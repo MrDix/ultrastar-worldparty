@@ -40,6 +40,7 @@ var
   GamePath:         IPath;
   SoundPath:        IPath;
   SongPaths:        IInterfaceList;
+  DynamicSongPaths: IInterfaceList;
   LogPath:          IPath;
   ThemePath:        IPath;
   SkinsPath:        IPath;
@@ -63,6 +64,8 @@ procedure InitializePaths();
 procedure InitializeSongPaths();
 procedure AddSongPath(const Path: IPath); overload;
 procedure AddSongPath(const Path: IPath; const bMakeDir: boolean); overload;
+procedure AddDynamicSongPath(const Path: IPath);
+function IsDynamicSongPath(const Path: IPath): boolean;
 function GetConfigFileName(): IPath;
 function GetDatabaseFileName(): IPath;
 
@@ -118,6 +121,29 @@ begin
   PathList.Add(PathAbs);
 end;
 
+// checks whether the given path equals or lies inside one of the paths
+// of the given list
+function IsPathWithinList(const Path: IPath; const List: IInterfaceList): boolean;
+var
+  Index: integer;
+  PathAbs, ListPathAbs: IPath;
+begin
+  Result := false;
+  if (List = nil) or Path.Equals(PATH_NONE) then
+    Exit;
+
+  PathAbs := Path.GetAbsolutePath().AppendPathDelim();
+  for Index := 0 to List.Count - 1 do
+  begin
+    ListPathAbs := (List[Index] as IPath).GetAbsolutePath().AppendPathDelim();
+    if (PathAbs.IsChildOf(ListPathAbs, false) or ListPathAbs.Equals(PathAbs)) then
+    begin
+      Result := true;
+      Exit;
+    end;
+  end;
+end;
+
 procedure AddSongPath(const Path: IPath);
 begin
   AddSongPath(Path, true);
@@ -125,7 +151,29 @@ end;
 
 procedure AddSongPath(const Path: IPath; const bMakeDir: boolean);
 begin
+  if IsPathWithinList(Path, DynamicSongPaths) then
+  begin
+    Log.LogWarn('Ignoring song path overlapping a dynamic song path: ' + Path.ToNative, 'AddSongPath');
+    Exit;
+  end;
   AddSpecialPath(SongPaths, Path, bMakeDir);
+end;
+
+procedure AddDynamicSongPath(const Path: IPath);
+begin
+  if IsPathWithinList(Path, SongPaths) then
+  begin
+    Log.LogWarn('Ignoring dynamic song path overlapping an existing song path: ' + Path.ToNative, 'AddDynamicSongPath');
+    Exit;
+  end;
+  AddSpecialPath(DynamicSongPaths, Path, false);
+end;
+
+// checks whether the given path lies inside one of the configured
+// dynamic song directories
+function IsDynamicSongPath(const Path: IPath): boolean;
+begin
+  Result := IsPathWithinList(Path, DynamicSongPaths);
 end;
 
 procedure AddCoverPath(const Path: IPath);
@@ -224,6 +272,7 @@ end;
 procedure InitializeSongPaths();
 begin
   SongPaths := TInterfaceList.Create();
+  DynamicSongPaths := TInterfaceList.Create();
   AddSongPath(UCommandLine.Params.SongPath);
   AddSongPath(UPlatform.Platform().GetGameUserPath().Append('songs'));
   {$IF Defined(DARWIN)}

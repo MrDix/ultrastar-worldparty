@@ -125,6 +125,7 @@ type
       ShowDuets:      integer;
       Tabs:           integer;
       Sorting:        integer;
+      DynamicSongsFilter: integer;
       ShowScores:     integer;
       ShowWebScore:   integer;
 
@@ -287,6 +288,7 @@ const
   IDifficulty: array[0..3] of UTF8String = ('Easy', 'Medium', 'Hard', 'Training');
   Switch:             array[0..1] of UTF8String = ('Off', 'On');
   ISorting:           array[0..9] of UTF8String = ('Edition', 'Genre', 'Language', 'Folder', 'Title', 'Artist', 'Year', 'Decade', 'Recents', 'LastAdded');
+  IDynamicSongsFilter: array[0..2] of UTF8String = ('All', 'Standard', 'Dynamic');
   ISongMenuMode: array[0..7] of UTF8String = ('Roulette', 'Chessboard', 'Carousel', 'Slot Machine', 'Slide', 'List', 'Compact list', 'Mosaic');
 
 type
@@ -655,7 +657,9 @@ begin
   IniFile.ReadSection('Directories', PathStrings);
   for I := 0 to PathStrings.Count - 1 do
     if (Pos('SONGDIR', UpperCase(PathStrings[I])) = 1) then
-      UPathUtils.AddSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')),false);
+      UPathUtils.AddSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')),false)
+    else if (Pos('DYNAMICSONGDIR', UpperCase(PathStrings[I])) = 1) then
+      UPathUtils.AddDynamicSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')));
 
   PathStrings.Free();
 end;
@@ -885,6 +889,9 @@ begin
   // Song Sorting
   Sorting := ReadArrayIndex(ISorting, IniFile, 'General', 'Sorting', Ord(sTitle));
 
+  // Filter for songs from dynamic song directories
+  DynamicSongsFilter := ReadArrayIndex(IDynamicSongsFilter, IniFile, 'General', 'DynamicSongsFilter', 0);
+
   // Show Score
   ShowScores := ReadArrayIndex(IShowScores, IniFile, 'General', 'ShowScores', IGNORE_INDEX, 'On');
 
@@ -1092,6 +1099,9 @@ begin
 
   // Sorting
   IniFile.WriteString('General', 'Sorting', ISorting[Sorting]);
+
+  // Filter for songs from dynamic song directories
+  IniFile.WriteString('General', 'DynamicSongsFilter', IDynamicSongsFilter[DynamicSongsFilter]);
 
   // Show Scores
   IniFile.WriteString('General', 'ShowScores', IShowScores[ShowScores]);

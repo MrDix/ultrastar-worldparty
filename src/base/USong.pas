@@ -97,6 +97,7 @@ type
     Folder:       UTF8String; // for sorting by folder (only set if file was found)
     FileName:     IPath; // just name component of file (only set if file was found)
     MD5:          string; //MD5 Hash of Current Song
+    InDynamicDir: boolean; // song was loaded from one of the dynamic song directories
 
     // filenames
     Cover:      IPath;
@@ -230,29 +231,40 @@ end;
 //       nothing to do with the path used for file loading
 function TSong.GetFolderCategory(const aFileName: IPath): UTF8String;
 var
-  I: Integer;
+  I, ListIndex: Integer;
   CurSongPath: IPath;
   CurSongPathRel: IPath;
+  Paths: IInterfaceList;
 begin
   Result := 'Unknown'; //default folder category, if we can't locate the song dir
 
-  for I := 0 to SongPaths.Count-1 do
+  for ListIndex := 0 to 1 do
   begin
-    CurSongPath := SongPaths[I] as IPath;
-    if (aFileName.IsChildOf(CurSongPath, false)) then
+    if (ListIndex = 0) then
+      Paths := SongPaths
+    else
+      Paths := DynamicSongPaths;
+    if (Paths = nil) then
+      Continue;
+
+    for I := 0 to Paths.Count-1 do
     begin
-      if (aFileName.IsChildOf(CurSongPath, true)) then
+      CurSongPath := Paths[I] as IPath;
+      if (aFileName.IsChildOf(CurSongPath, false)) then
       begin
-        // songs are in the "root" of the songdir => use songdir for the categorys name
-        Result := CurSongPath.RemovePathDelim.ToUTF8;
-      end
-      else
-      begin
-        // use the first subdirectory below CurSongPath as the category name
-        CurSongPathRel := aFileName.GetRelativePath(CurSongPath.AppendPathDelim);
-        Result := CurSongPathRel.SplitDirs[0].RemovePathDelim.ToUTF8;
+        if (aFileName.IsChildOf(CurSongPath, true)) then
+        begin
+          // songs are in the "root" of the songdir => use songdir for the categorys name
+          Result := CurSongPath.RemovePathDelim.ToUTF8;
+        end
+        else
+        begin
+          // use the first subdirectory below CurSongPath as the category name
+          CurSongPathRel := aFileName.GetRelativePath(CurSongPath.AppendPathDelim);
+          Result := CurSongPathRel.SplitDirs[0].RemovePathDelim.ToUTF8;
+        end;
+        Exit;
       end;
-      Exit;
     end;
   end;
 end;
@@ -265,6 +277,7 @@ begin
   Self.FileName := aFileName.GetName();
   Self.FullPath := aFileName.GetAbsolutePath().ToNative();
   Self.Folder := Self.GetFolderCategory(aFileName);
+  Self.InDynamicDir := UPathUtils.IsDynamicSongPath(aFileName);
 
   //Main Information
   Self.Title  := '';
