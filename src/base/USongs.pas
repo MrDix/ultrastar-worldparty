@@ -116,6 +116,7 @@ type
       ShowCategories: boolean;
       Sorting: integer;
       VisibleSongs: integer;
+      DynamicFilter: integer; //which song sources to show (see UIni.IDynamicSongsFilter)
       procedure SortSongs();
     public
       Song: array of TSong; //songs categorized
@@ -269,6 +270,11 @@ begin
   begin
     Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.SongPaths[I]).ToNative()]);
     Self.FindTxts(IPath(UPathUtils.SongPaths[I]));
+  end;
+  for I := 0 to UPathUtils.DynamicSongPaths.Count - 1 do //find txt files on dynamic directories and add songs
+  begin
+    Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.DynamicSongPaths[I]).ToNative()]);
+    Self.FindTxts(IPath(UPathUtils.DynamicSongPaths[I]));
   end;
   while not Self.ProgressSong.Finished do
   begin
@@ -537,13 +543,15 @@ var
   CurCategory, CategoryName, tmpCategory: UTF8String;
 begin
   Result := false;
-  if (Self.VisibleSongs = 0) or (Self.Sorting <> Sort) or (Self.ShowCategories <> Categories) or (Self.ShowDuets <> Duets) then
+  if (Self.VisibleSongs = 0) or (Self.Sorting <> Sort) or (Self.ShowCategories <> Categories) or (Self.ShowDuets <> Duets)
+    or (Self.DynamicFilter <> UIni.Ini.DynamicSongsFilter) then
   begin
     Result := true;
     Self.Selected := 0;
     Self.Sorting := Sort;
     Self.ShowCategories := Categories;
     Self.ShowDuets := Duets;
+    Self.DynamicFilter := UIni.Ini.DynamicSongsFilter;
     Self.CatCount := 0;
     Self.CatNumShow := -1;
     Self.VisibleSongs := 0;
@@ -554,7 +562,10 @@ begin
     for I := 0 to Songs.SongList.Count - 1 do
     begin
       NewSong := TSong(Songs.SongList[I]);
-      if Self.ShowDuets or (not NewSong.isDuet) then //add a new song
+      if (Self.ShowDuets or (not NewSong.isDuet))
+        and ((Self.DynamicFilter = 0)
+          or ((Self.DynamicFilter = 1) and (not NewSong.InDynamicDir))
+          or ((Self.DynamicFilter = 2) and NewSong.InDynamicDir)) then //add a new song
       begin
         Inc(Self.VisibleSongs);
         if Self.ShowCategories then
