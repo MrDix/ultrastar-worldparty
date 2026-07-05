@@ -47,7 +47,6 @@ File /r /x .svn /x .gitignore ..\game\sounds
 File /r /x .svn /x .gitignore ..\game\fonts
 File /r /x .svn /x .gitignore ..\game\resources
 File /r /x .svn /x .gitignore ..\game\visuals
-File /r /x .svn /x .gitignore ..\game\webs
 File /r /x .svn /x .gitignore ..\game\soundfonts
 File /r /x .svn /x .gitignore ..\game\avatars
 File /r /x .svn /x .gitignore ..\game\licenses

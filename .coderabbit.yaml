@@ -1,0 +1,20 @@
+language: "de-DE"
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+  path_filters:
+    - "!src/lib/**"
+    - "!installer/dependencies/**"
+    - "!game/themes/**"
+    - "!game/avatars/**"
+    - "!game/covers/**"
+    - "!game/fonts/**"
+    - "!game/sounds/**"
+    - "!game/visuals/**"
+    - "!icons/**"
+chat:
+  auto_reply: true
