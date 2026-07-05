@@ -127,6 +127,7 @@ type
       function FindGlobalIndex(VisibleIndex:integer): integer; //find global index of all songs from a index of visible songs subgroup
       function FindVisibleIndex(Index: integer): integer; //find the index of a song in the subset of all visible songs
       function GetVisibleSongs(): integer; //returns number of visible songs
+      procedure Invalidate(); //force a rebuild of the songs array on the next Refresh call
       function IsFilterApplied(): boolean; //returns if some filter has been applied to song list
       function Refresh(Sort: integer; Categories: boolean; Duets: boolean): boolean; //sets sorting, show or not songs in categories and/or duets refreshing songs array
       function SetFilter(FilterStr: UTF8String; Filter: TSongFilter = sfAll): cardinal;
@@ -137,6 +138,8 @@ type
 var
   Songs: TSongs; //all songs
   CatSongs: TCatSongs; //categorized songs
+
+function DisableSong(Song: USong.TSong): boolean; //move a song folder to the disabled songs folder and remove its songs from the library
 
 implementation
 
@@ -153,6 +156,72 @@ uses
   UNote,
   UPathUtils,
   UUnicodeUtils;
+
+{ Moves the folder of the given song (keeping its subpath below the song
+  directory it was loaded from) into the disabled songs folder and removes
+  all songs of that folder from the loaded song list.
+  The move is a rename, so the disabled songs folder has to reside on the
+  same volume as the source directory. }
+function DisableSong(Song: USong.TSong): boolean;
+var
+  I, ListIndex: integer;
+  Paths: IInterfaceList;
+  RootAbs, SongDirAbs, Target, RelPath: IPath;
+  OtherSong: USong.TSong;
+begin
+  Result := false;
+  if (Song = nil) or Song.Main or UPathUtils.DisabledSongPath.Equals(PATH_NONE) then
+    Exit;
+
+  SongDirAbs := Song.Path.GetAbsolutePath().AppendPathDelim();
+
+  //find the configured song directory the song was loaded from
+  RelPath := PATH_NONE;
+  for ListIndex := 0 to 1 do
+  begin
+    if (ListIndex = 0) then
+      Paths := UPathUtils.SongPaths
+    else
+      Paths := UPathUtils.DynamicSongPaths;
+    if (Paths = nil) then
+      Continue;
+
+    for I := 0 to Paths.Count - 1 do
+    begin
+      RootAbs := (Paths[I] as IPath).GetAbsolutePath().AppendPathDelim();
+      if SongDirAbs.IsChildOf(RootAbs, false) then
+      begin
+        RelPath := SongDirAbs.GetRelativePath(RootAbs);
+        Break;
+      end;
+    end;
+    if not RelPath.Equals(PATH_NONE) then
+      Break;
+  end;
+
+  //songs directly in the root of a song directory have no own folder to move
+  if RelPath.Equals(PATH_NONE) or (RelPath.ToUTF8() = '') then
+    Exit;
+
+  Target := UPathUtils.DisabledSongPath.Append(RelPath);
+  if Target.Exists() then //do not overwrite an already disabled song
+    Exit;
+  if not Target.GetParent().CreateDirectory(true) then
+    Exit;
+  if not Song.Path.RemovePathDelim().Rename(Target.RemovePathDelim()) then
+    Exit;
+
+  //remove all songs loaded from the moved folder from the library;
+  //the TSong instances are not freed here as the categorized view may
+  //still reference them until it is rebuilt
+  for I := Songs.SongList.Count - 1 downto 0 do
+  begin
+    OtherSong := USong.TSong(Songs.SongList[I]);
+    if OtherSong.Path.GetAbsolutePath().AppendPathDelim().Equals(SongDirAbs) then
+      Songs.SongList.Delete(I);
+  end;
+  Result := true;
+end;
 
 constructor TSongsParse.Create();
 begin
@@ -527,6 +596,12 @@ end;
 function TCatSongs.GetVisibleSongs(): integer;
 begin
   Result := Self.VisibleSongs;
+end;
+
+{* Forces a rebuild of the songs array on the next Refresh call *}
+procedure TCatSongs.Invalidate();
+begin
+  Self.VisibleSongs := 0;
 end;
 
 {* Returns if some filter has been applied to song list *}
