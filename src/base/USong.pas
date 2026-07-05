@@ -92,7 +92,7 @@ type
     function LoadSong(DuetChange: boolean): boolean;
     function ReadTxtHeader(): boolean;
   public
-    Path:         IPath; // kust path component of file (only set if file was found)
+    Path:         IPath; // just path component of file (only set if file was found)
     FullPath: UTF8String;
     Folder:       UTF8String; // for sorting by folder (only set if file was found)
     FileName:     IPath; // just name component of file (only set if file was found)
