@@ -1,0 +1,122 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - alfa
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FPC_VERSION: "3.2.2"
+  FPC_URL: "https://downloads.freepascal.org/fpc/dist/3.2.2/i386-win32/fpc-3.2.2.i386-win32.exe"
+
+jobs:
+  build_windows:
+    name: Build for Windows (32-bit)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        shell: bash
+        run: |
+          VNAME="$(cat VERSION)-$(git rev-parse --short HEAD)"
+          echo "versionName=$VNAME" >> "$GITHUB_ENV"
+
+      - name: Cache FPC installer
+        id: cache-fpc
+        uses: actions/cache@v4
+        with:
+          path: fpc-installer.exe
+          key: fpc-${{ env.FPC_VERSION }}-i386-win32
+
+      - name: Download FPC installer
+        if: steps.cache-fpc.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          curl.exe -L --retry 5 --max-time 300 -o fpc-installer.exe "$env:FPC_URL"
+
+      - name: Install FPC
+        shell: pwsh
+        run: |
+          Start-Process -FilePath ".\fpc-installer.exe" -ArgumentList "/VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART /DIR=C:\FPC\$env:FPC_VERSION" -Wait
+          & "C:\FPC\$env:FPC_VERSION\bin\i386-win32\fpc.exe" -iV
+
+      - name: Compile resources
+        shell: cmd
+        working-directory: res
+        run: |
+          C:\FPC\%FPC_VERSION%\bin\i386-win32\fpcres.exe link.rc -o link.res -of res
+
+      - name: Build release executable
+        shell: cmd
+        working-directory: src
+        run: |
+          set PATH=C:\FPC\%FPC_VERSION%\bin\i386-win32;%PATH%
+          if not exist ..\build mkdir ..\build
+          fpc WorldParty.dpr -FE..\game -FU..\build -O4 -Xs -oWorldParty.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Build debug executable
+        shell: cmd
+        working-directory: src
+        run: |
+          set PATH=C:\FPC\%FPC_VERSION%\bin\i386-win32;%PATH%
+          if exist ..\build rmdir /S /Q ..\build
+          mkdir ..\build
+          fpc WorldParty.dpr -FE..\game -FU..\build -g -gl -dDEBUG_MODE -oWorldPartyDebug.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $plugins = "installer\dependencies\plugins\*.dll"
+          Copy-Item $plugins "C:\Program Files (x86)\NSIS\Plugins\x86-ansi\" -Force
+          Copy-Item "installer\dependencies\Unicode\Plugins\*.dll" "C:\Program Files (x86)\NSIS\Plugins\x86-unicode\" -Force
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "installer\WorldParty Installer.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installer = Get-ChildItem "installer\dist\*.exe" | Select-Object -First 1
+          Move-Item $installer.FullName "WorldParty-windows-installer-${{ env.versionName }}.exe"
+
+      - name: Create portable archive
+        shell: pwsh
+        run: |
+          7z a "WorldParty-windows-portable-${{ env.versionName }}.zip" .\game\*
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldParty-windows-installer-${{ env.versionName }}
+          path: WorldParty-windows-installer-${{ env.versionName }}.exe
+          if-no-files-found: error
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldParty-windows-portable-${{ env.versionName }}
+          path: WorldParty-windows-portable-${{ env.versionName }}.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "WorldParty-windows-installer-${{ env.versionName }}.exe" `
+            "WorldParty-windows-portable-${{ env.versionName }}.zip" `
+            --title "UltraStar WorldParty ${{ github.ref_name }}" `
+            --generate-notes
