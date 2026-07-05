@@ -87,6 +87,8 @@ begin
 end;
 
 constructor TAvatarList.Create();
+const
+  Extensions: array [0..1] of string = ('jpg', 'png');
 var
   I: integer;
   Iterator: IFileIterator;
@@ -98,7 +100,7 @@ begin
   inherited Create();
   Self.Avatars := TFPList.Create();
   I := 1;
-  for Extension in ['jpg', 'png'] do
+  for Extension in Extensions do
   begin
     Iterator := UFilesystem.FileSystem.FileFind(UPathUtils.AvatarsPath.Append('*.' + Extension), 0);
     while Iterator.HasNext() do

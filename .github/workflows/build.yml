@@ -49,6 +49,12 @@ jobs:
           Start-Process -FilePath ".\fpc-installer.exe" -ArgumentList "/VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART /DIR=C:\FPC\$env:FPC_VERSION" -Wait
           & "C:\FPC\$env:FPC_VERSION\bin\i386-win32\fpc.exe" -iV
 
+      - name: Compile resources
+        shell: cmd
+        working-directory: res
+        run: |
+          C:\FPC\%FPC_VERSION%\bin\i386-win32\fpcres.exe link.rc -o link.res -of res
+
       - name: Build release executable
         shell: cmd
         working-directory: src
@@ -57,7 +63,6 @@ jobs:
           if not exist ..\build mkdir ..\build
           fpc WorldParty.dpr -FE..\game -FU..\build -O4 -Xs -oWorldParty.exe
           if errorlevel 1 exit /b 1
-          if exist ..\build\link.res move /Y ..\build\link.res ..\res\link.res
 
       - name: Build debug executable
         shell: cmd
@@ -68,7 +73,6 @@ jobs:
           mkdir ..\build
           fpc WorldParty.dpr -FE..\game -FU..\build -g -gl -dDEBUG_MODE -oWorldPartyDebug.exe
           if errorlevel 1 exit /b 1
-          if exist ..\build\link.res move /Y ..\build\link.res ..\res\link.res
 
       - name: Install NSIS
         shell: pwsh
