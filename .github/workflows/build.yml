@@ -50,25 +50,25 @@ jobs:
           & "C:\FPC\$env:FPC_VERSION\bin\i386-win32\fpc.exe" -iV
 
       - name: Build release executable
-        shell: pwsh
+        shell: cmd
         working-directory: src
         run: |
-          $env:PATH = "C:\FPC\$env:FPC_VERSION\bin\i386-win32;$env:PATH"
-          New-Item -ItemType Directory -Force ..\build | Out-Null
+          set PATH=C:\FPC\%FPC_VERSION%\bin\i386-win32;%PATH%
+          if not exist ..\build mkdir ..\build
           fpc WorldParty.dpr -FE..\game -FU..\build -O4 -Xs -oWorldParty.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path ..\build\link.res) { Move-Item -Force ..\build\link.res ..\res\link.res }
+          if errorlevel 1 exit /b 1
+          if exist ..\build\link.res move /Y ..\build\link.res ..\res\link.res
 
       - name: Build debug executable
-        shell: pwsh
+        shell: cmd
         working-directory: src
         run: |
-          $env:PATH = "C:\FPC\$env:FPC_VERSION\bin\i386-win32;$env:PATH"
-          Remove-Item -Recurse -Force ..\build -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force ..\build | Out-Null
+          set PATH=C:\FPC\%FPC_VERSION%\bin\i386-win32;%PATH%
+          if exist ..\build rmdir /S /Q ..\build
+          mkdir ..\build
           fpc WorldParty.dpr -FE..\game -FU..\build -g -gl -dDEBUG_MODE -oWorldPartyDebug.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path ..\build\link.res) { Move-Item -Force ..\build\link.res ..\res\link.res }
+          if errorlevel 1 exit /b 1
+          if exist ..\build\link.res move /Y ..\build\link.res ..\res\link.res
 
       - name: Install NSIS
         shell: pwsh
