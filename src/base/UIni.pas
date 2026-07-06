@@ -651,15 +651,23 @@ procedure TIni.LoadPaths(IniFile: TCustomIniFile);
 var
   PathStrings: TStringList;
   I: integer;
+  DisabledDir: string;
 begin
   UPathUtils.InitializeSongPaths();
+  DisabledDir := '';
   PathStrings := TStringList.Create();
   IniFile.ReadSection('Directories', PathStrings);
   for I := 0 to PathStrings.Count - 1 do
     if (Pos('SONGDIR', UpperCase(PathStrings[I])) = 1) then
       UPathUtils.AddSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')),false)
     else if (Pos('DYNAMICSONGDIR', UpperCase(PathStrings[I])) = 1) then
-      UPathUtils.AddDynamicSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')));
+      UPathUtils.AddDynamicSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')))
+    else if (UpperCase(PathStrings[I]) = 'DISABLEDSONGDIR') then
+      DisabledDir := IniFile.ReadString('Directories', PathStrings[I], '');
+
+  // set after the loop so the overlap check sees all scanned directories
+  if (DisabledDir <> '') then
+    UPathUtils.SetDisabledSongPath(UPath.Path(DisabledDir));
 
   PathStrings.Free();
 end;

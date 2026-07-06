@@ -101,6 +101,7 @@ var
 implementation
 
 uses
+  Classes,
   Math,
   UCommon,
   UDatabase,
@@ -110,6 +111,8 @@ uses
   UTexture,
   ULanguage,
   UParty,
+  UPath,
+  UPathUtils,
   UPlaylist,
   USong,
   USongs,
@@ -317,7 +320,8 @@ begin
         Button[2].Visible := true;
         Button[3].Visible :=((Length(PlaylistMedley.Song) > 0) or (CatSongs.Song[ScreenSong.Interaction].Medley.Source > msNone));
         Button[4].Visible := true;
-        Button[5].Visible := false;
+        // moving songs to the trash folder is only offered when one is configured
+        Button[5].Visible := not UPathUtils.DisabledSongPath.Equals(PATH_NONE);
 
         SelectsS[0].Visible := false;
         SelectsS[1].Visible := false;
@@ -328,6 +332,7 @@ begin
         Button[2].Text[0].Text := Language.Translate('SONG_MENU_PLAYLIST_ADD');
         Button[3].Text[0].Text := Language.Translate('C_SING_MEDLEY');
         Button[4].Text[0].Text := Language.Translate('C_BACK');
+        Button[5].Text[0].Text := Language.Translate('SONG_MENU_DISABLE_SONG');
       end;
 
     SM_Medley:
@@ -745,6 +750,34 @@ begin
 end;
 
 
+procedure OnDisableSong(Value: boolean; Data: Pointer);
+var
+  RemovedSongs: TList;
+  I: integer;
+begin
+  Display.CheckOK := Value;
+  if (Value) then
+  begin
+    Display.CheckOK := false;
+    RemovedSongs := TList.Create();
+    try
+      if USongs.DisableSong(USongs.CatSongs.Song[UGraphic.ScreenSong.Interaction], RemovedSongs) then
+      begin
+        USongs.CatSongs.Invalidate();
+        UGraphic.ScreenSong.OnShow();
+        // the categorized view has been rebuilt, nothing references the
+        // removed songs anymore
+        for I := 0 to RemovedSongs.Count - 1 do
+          USong.TSong(RemovedSongs[I]).Free();
+      end
+      else
+        UGraphic.ScreenPopupError.ShowPopup(Language.Translate('SONG_MENU_DISABLE_ERROR'));
+    finally
+      RemovedSongs.Free();
+    end;
+  end;
+end;
+
 procedure TScreenSongMenu.HandleReturn;
 begin
   case CurMenu of
@@ -815,6 +848,12 @@ begin
             begin
               // show main menu (cancel)
               MenuShow(SM_Main);
+            end;
+          8: // button 6
+            begin
+              // move the selected song to the trash folder (after confirmation)
+              Visible := false;
+              UGraphic.ScreenPopupCheck.ShowPopup('SONG_MENU_DISABLE_CONFIRM', @OnDisableSong, nil, false);
             end;
           end;
       end;

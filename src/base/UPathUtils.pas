@@ -41,6 +41,7 @@ var
   SoundPath:        IPath;
   SongPaths:        IInterfaceList;
   DynamicSongPaths: IInterfaceList;
+  DisabledSongPath: IPath; // trash folder for disabled songs (PATH_NONE if unset)
   LogPath:          IPath;
   ThemePath:        IPath;
   SkinsPath:        IPath;
@@ -66,6 +67,7 @@ procedure AddSongPath(const Path: IPath); overload;
 procedure AddSongPath(const Path: IPath; const bMakeDir: boolean); overload;
 procedure AddDynamicSongPath(const Path: IPath);
 function IsDynamicSongPath(const Path: IPath): boolean;
+procedure SetDisabledSongPath(const Path: IPath);
 function GetConfigFileName(): IPath;
 function GetDatabaseFileName(): IPath;
 
@@ -176,6 +178,19 @@ begin
   Result := IsPathWithinList(Path, DynamicSongPaths);
 end;
 
+procedure SetDisabledSongPath(const Path: IPath);
+begin
+  if Path.Equals(PATH_NONE) then
+    Exit;
+  // a trash folder inside a scanned directory would get rescanned again
+  if IsPathWithinList(Path, SongPaths) or IsPathWithinList(Path, DynamicSongPaths) then
+  begin
+    Log.LogWarn('Ignoring disabled song path inside a scanned song path: ' + Path.ToNative, 'SetDisabledSongPath');
+    Exit;
+  end;
+  DisabledSongPath := Path.GetAbsolutePath().AppendPathDelim();
+end;
+
 procedure AddCoverPath(const Path: IPath);
 begin
   AddSpecialPath(CoverPaths, Path, true);
@@ -273,6 +288,7 @@ procedure InitializeSongPaths();
 begin
   SongPaths := TInterfaceList.Create();
   DynamicSongPaths := TInterfaceList.Create();
+  DisabledSongPath := PATH_NONE;
   AddSongPath(UCommandLine.Params.SongPath);
   AddSongPath(UPlatform.Platform().GetGameUserPath().Append('songs'));
   {$IF Defined(DARWIN)}
