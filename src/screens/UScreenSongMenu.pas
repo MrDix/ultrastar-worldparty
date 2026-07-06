@@ -101,6 +101,7 @@ var
 implementation
 
 uses
+  Classes,
   Math,
   UCommon,
   UDatabase,
@@ -750,18 +751,30 @@ end;
 
 
 procedure OnDisableSong(Value: boolean; Data: Pointer);
+var
+  RemovedSongs: TList;
+  I: integer;
 begin
   Display.CheckOK := Value;
   if (Value) then
   begin
     Display.CheckOK := false;
-    if USongs.DisableSong(USongs.CatSongs.Song[UGraphic.ScreenSong.Interaction]) then
-    begin
-      USongs.CatSongs.Invalidate();
-      UGraphic.ScreenSong.OnShow();
-    end
-    else
-      UGraphic.ScreenPopupError.ShowPopup(Language.Translate('SONG_MENU_DISABLE_ERROR'));
+    RemovedSongs := TList.Create();
+    try
+      if USongs.DisableSong(USongs.CatSongs.Song[UGraphic.ScreenSong.Interaction], RemovedSongs) then
+      begin
+        USongs.CatSongs.Invalidate();
+        UGraphic.ScreenSong.OnShow();
+        // the categorized view has been rebuilt, nothing references the
+        // removed songs anymore
+        for I := 0 to RemovedSongs.Count - 1 do
+          USong.TSong(RemovedSongs[I]).Free();
+      end
+      else
+        UGraphic.ScreenPopupError.ShowPopup(Language.Translate('SONG_MENU_DISABLE_ERROR'));
+    finally
+      RemovedSongs.Free();
+    end;
   end;
 end;
 

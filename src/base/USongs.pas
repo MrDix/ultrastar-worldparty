@@ -139,7 +139,7 @@ var
   Songs: TSongs; //all songs
   CatSongs: TCatSongs; //categorized songs
 
-function DisableSong(Song: USong.TSong): boolean; //move a song folder to the disabled songs folder and remove its songs from the library
+function DisableSong(Song: USong.TSong; RemovedSongs: TList): boolean; //move a song folder to the disabled songs folder and remove its songs from the library
 
 implementation
 
@@ -161,8 +161,11 @@ uses
   directory it was loaded from) into the disabled songs folder and removes
   all songs of that folder from the loaded song list.
   The move is a rename, so the disabled songs folder has to reside on the
-  same volume as the source directory. }
-function DisableSong(Song: USong.TSong): boolean;
+  same volume as the source directory.
+  The removed TSong instances are appended to RemovedSongs and ownership
+  passes to the caller: they must stay alive until the categorized view no
+  longer references them (after Invalidate and a rebuild) and be freed then. }
+function DisableSong(Song: USong.TSong; RemovedSongs: TList): boolean;
 var
   I, ListIndex: integer;
   Paths: IInterfaceList;
@@ -212,13 +215,15 @@ begin
     Exit;
 
   //remove all songs loaded from the moved folder from the library;
-  //the TSong instances are not freed here as the categorized view may
-  //still reference them until it is rebuilt
+  //the instances are handed over to the caller for deferred destruction
   for I := Songs.SongList.Count - 1 downto 0 do
   begin
     OtherSong := USong.TSong(Songs.SongList[I]);
     if OtherSong.Path.GetAbsolutePath().AppendPathDelim().Equals(SongDirAbs) then
+    begin
+      RemovedSongs.Add(OtherSong);
       Songs.SongList.Delete(I);
+    end;
   end;
   Result := true;
 end;
