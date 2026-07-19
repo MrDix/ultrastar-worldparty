@@ -8,7 +8,6 @@
 !include WinVer.nsh
 !include LogicLib.nsh
 !include nsDialogs.nsh
-!include UAC.nsh
 ;!include LangFile.nsh ; included in NSIS installation
 !include nsResize.nsh
 
@@ -70,9 +69,9 @@ OutFile "dist\${exeupdate}.exe"
 
 InstallDir "${PRODUCT_PATH}"
 
-; Windows Vista / Windows 7:
-; must be "user" for UAC plugin 
-RequestExecutionLevel user
+; Let the OS handle the elevation prompt instead of the legacy
+; UAC plugin, which is broken on current systems.
+RequestExecutionLevel admin
 
 ; ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~
 ; Interface Settings
@@ -308,11 +307,12 @@ Function FinishShowCallback
 	${endif}
 FunctionEnd
 
-Function RunInstaller 
+Function RunInstaller
 	IfFileExists "$installerexe" 0 +3
-		UAC::ShellExec "open" "" "$installerexe" "" ""
+		; the installer elevates itself, no plugin needed
+		ExecShell "open" "$installerexe"
 		Goto End
-	
+
 	End:
 FunctionEnd
 
@@ -488,7 +488,6 @@ Function .onInit
 
 	!define PRODUCT_NAME111 "${name} ${version}"
 
-	${UAC.I.Elevate.AdminOnly}
 	System::Call 'kernel32::CreateMutexA(i 0, i 0, t "WorldParty Update.exe") ?e'
 
 	Pop $R0
