@@ -97,13 +97,14 @@ type
       Threads: array of TSongsParse; //threads to parse songs
       Thread: integer; //current thread
       CoresAvailable: integer; //cores available for working threads
+      KeepSongs: TList; //already parsed songs carried over from a previous scan; when set, only the dynamic song directories are scanned
       procedure FindTxts(const Dir: IPath);
     protected
       procedure Execute; override;
     public
       SongList: TList; //array of songs
       Selected: integer; //selected song index
-      constructor Create();
+      constructor Create(const CarryOverSongs: TList = nil);
       destructor Destroy(); override;
       function GetLoadProgress(): TProgressSong;
       procedure PreloadCovers(Preload: boolean);
@@ -281,7 +282,7 @@ begin
   Result := Self.Txts;
 end;
 
-constructor TSongs.Create();
+constructor TSongs.Create(const CarryOverSongs: TList = nil);
 var
   I: integer;
 begin
@@ -289,6 +290,7 @@ begin
   Self.Event := RTLEventCreate();
   Self.FreeOnTerminate := false;
   Self.SongList := TList.Create();
+  Self.KeepSongs := CarryOverSongs;
   Self.Thread := 0;
   Self.CoresAvailable := Max(0, CpuCount.GetLogicalCpuCount() - 2); //total core - main and songs threads
   Setlength(Self.Threads, Self.CoresAvailable + 1);
@@ -332,19 +334,27 @@ end;
 { Create a new thread to load songs and update main screen with progress }
 procedure TSongs.Execute();
 var
-  I, Processed: integer;
+  I, Processed, Kept: integer;
   Song: TSong;
 begin
+  Kept := 0;
   Log.BenchmarkStart(2);
   Log.LogStatus('Searching for songs', 'SongList');
   Self.ProgressSong.Total := 0;
   Self.ProgressSong.Finished := false;
   Self.ProgressSong.CoversPreload := true;
-  for I := 0 to UPathUtils.SongPaths.Count - 1 do //find txt files on directories and add songs
+  if Self.KeepSongs <> nil then //dynamic-only rescan: reuse the already parsed songs instead of scanning their directories again
   begin
-    Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.SongPaths[I]).ToNative()]);
-    Self.FindTxts(IPath(UPathUtils.SongPaths[I]));
-  end;
+    Self.SongList.AddList(Self.KeepSongs);
+    Kept := Self.KeepSongs.Count;
+    FreeAndNil(Self.KeepSongs);
+  end
+  else
+    for I := 0 to UPathUtils.SongPaths.Count - 1 do //find txt files on directories and add songs
+    begin
+      Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.SongPaths[I]).ToNative()]);
+      Self.FindTxts(IPath(UPathUtils.SongPaths[I]));
+    end;
   for I := 0 to UPathUtils.DynamicSongPaths.Count - 1 do //find txt files on dynamic directories and add songs
   begin
     Self.ProgressSong.Folder := Format(ULanguage.Language.Translate('SING_LOADING_SONGS'), [IPath(UPathUtils.DynamicSongPaths[I]).ToNative()]);
@@ -365,7 +375,7 @@ begin
         Self.Threads[I].Terminate();
       end;
 
-      Log.LogStatus('Search complete: '+IntToStr(Processed)+' songs found ('+IntToStr(Processed - Self.SongList.Count)+' with errors)', 'SongList');
+      Log.LogStatus('Search complete: '+IntToStr(Processed)+' songs found ('+IntToStr(Processed - (Self.SongList.Count - Kept))+' with errors, '+IntToStr(Kept)+' kept)', 'SongList');
       Self.ProgressSong.Folder := '';
       Self.ProgressSong.Finished := true;
       Log.LogBenchmark('Song loading', 2);

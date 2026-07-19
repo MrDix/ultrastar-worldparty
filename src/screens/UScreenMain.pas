@@ -49,7 +49,7 @@ type
       function ParseInput(PressedKey: Cardinal; CharCode: UCS4Char; PressedDown: boolean): boolean; override;
       function Draw: boolean; override;
       procedure OnShow; override;
-      procedure ReloadSongs(ScreenReturn: boolean = true);
+      procedure ReloadSongs(ScreenReturn: boolean = true; DynamicOnly: boolean = false);
       procedure SetInteraction(Num: integer); override;
       procedure SetAnimationProgress(Progress: real); override;
     private
@@ -61,6 +61,7 @@ type
 implementation
 
 uses
+  Classes,
   dglOpenGL,
   UGraphic,
   UNote,
@@ -163,8 +164,8 @@ begin
         InteractNext;
       SDLK_LEFT:
         InteractPrev;
-      SDLK_F5:
-        Self.ReloadSongs(false);
+      SDLK_F5: //F5 rescans only the dynamic song directories, Shift+F5 everything
+        Self.ReloadSongs(false, (SDL_GetModState() and (KMOD_LSHIFT or KMOD_RSHIFT)) = 0);
     end;
   end
 end;
@@ -265,15 +266,32 @@ begin
     Result := true;
 end;
 
-procedure TScreenMain.ReloadSongs(ScreenReturn: boolean = true);
+procedure TScreenMain.ReloadSongs(ScreenReturn: boolean = true; DynamicOnly: boolean = false);
+var
+  I: integer;
+  KeepList: Classes.TList;
+  Song: USong.TSong;
 begin
   if USongs.Songs.GetLoadProgress().Finished then
   begin
     UIni.Ini.Load();
+    //keep the parsed songs of the static directories on a dynamic-only
+    //rescan and free every discarded song instance
+    KeepList := nil;
+    if DynamicOnly then
+      KeepList := Classes.TList.Create();
+    for I := 0 to USongs.Songs.SongList.Count - 1 do
+    begin
+      Song := USong.TSong(USongs.Songs.SongList[I]);
+      if DynamicOnly and (not Song.InDynamicDir) then
+        KeepList.Add(Song)
+      else
+        Song.Free();
+    end;
     FreeAndNil(USongs.CatSongs);
     FreeAndNil(USongs.Songs);
     USongs.CatSongs := TCatSongs.Create();
-    USongs.Songs := TSongs.Create();
+    USongs.Songs := TSongs.Create(KeepList);
     Self.ReturnToSongScreenAfterLoadSongs := ScreenReturn;
   end
   else
