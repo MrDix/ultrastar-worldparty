@@ -116,6 +116,7 @@ RequestExecutionLevel admin
 !define MUI_FINISHPAGE_RUN_FUNCTION RunAppAsUser
 
 Function RunAppAsUser
+    SetOutPath "$INSTDIR"
     Exec '"$WINDIR\explorer.exe" "$INSTDIR\${exe}.exe"'
 FunctionEnd
 
@@ -169,12 +170,17 @@ Var ConfigIniPath ; Path to config.ini (e.g. "$INSTDIR\config.ini")
 ; Sets $UseAppData, $UserDataPath and $ConfigIniPath
 ; The install dir stays read-only for standard users, so the game
 ; runs in global mode and keeps per-user data in AppData.
+; Note: under elevation this resolves to the elevating user's profile.
+; That only affects installer-written defaults and convenience
+; shortcuts; the game itself creates and manages the per-user config
+; of whoever runs it on first launch.
 Function DetermineUserDataDir
 	StrCpy $UseAppData true
 	SetShellVarContext current
 	StrCpy $UserDataPath "$APPDATA\${exe}"
 	SetShellVarContext all
 	StrCpy $ConfigIniPath "$UserDataPath\config.ini"
+	CreateDirectory "$UserDataPath"
 FunctionEnd
 
 Function Settings
@@ -515,6 +521,9 @@ done:
 ;-----------------------
 
 	!insertmacro MUI_LANGDLL_DISPLAY
+
+	; initialize the user data paths before any page may use them
+	Call DetermineUserDataDir
 
 	!insertmacro INSTALLOPTIONS_EXTRACT_AS ".\settings\settings.ini" "Settings"
 
