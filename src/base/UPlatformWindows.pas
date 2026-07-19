@@ -170,8 +170,10 @@ begin
       // rights for it.
       // Note: Do not use IsReadOnly() as it does not check file privileges, so
       // a non-read-only file might not be writable for us.
+      // Note: TFileHandle is unsigned on this platform, so the error value -1
+      // must be compared as TFileHandle(-1); "Handle > -1" would always be true.
       Handle := ConfigIni.Open(fmOpenReadWrite);
-      if Handle > -1 then
+      if Handle <> TFileHandle(-1) then
       begin
         FileClose(Handle);
         UseLocalDirs := true;
@@ -182,7 +184,7 @@ begin
   begin
     // try to create config.ini
     Handle := ConfigIni.CreateFile();
-    if Handle > -1 then
+    if Handle <> TFileHandle(-1) then
     begin
       FileClose(Handle);
       UseLocalDirs := true;
