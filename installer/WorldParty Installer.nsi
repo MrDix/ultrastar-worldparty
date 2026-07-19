@@ -167,12 +167,13 @@ Var ConfigIniPath ; Path to config.ini (e.g. "$INSTDIR\config.ini")
 ; Determines the directory used for config.ini and other user
 ; settings and data.
 ; Sets $UseAppData, $UserDataPath and $ConfigIniPath
-; The install section grants all users write access to $INSTDIR
-; (see the AccessControl call there), so the game runs in portable
-; mode with its user data next to the executable.
+; The install dir stays read-only for standard users, so the game
+; runs in global mode and keeps per-user data in AppData.
 Function DetermineUserDataDir
-	StrCpy $UseAppData false
-	StrCpy $UserDataPath "$INSTDIR"
+	StrCpy $UseAppData true
+	SetShellVarContext current
+	StrCpy $UserDataPath "$APPDATA\${exe}"
+	SetShellVarContext all
 	StrCpy $ConfigIniPath "$UserDataPath\config.ini"
 FunctionEnd
 
@@ -307,8 +308,8 @@ Function un.DeleteAll
 	${NSD_GetState} $CHECKBOX_COVERS $CB_COVERS_State
 	${NSD_GetState} $CHECKBOX_CONFIG $CB_CONFIG_State
 	${NSD_GetState} $CHECKBOX_SCORES $CB_SCORES_State
-	${NSD_GetState} $CHECKBOX_SCORES $CB_SCREENSHOTS_State
-	${NSD_GetState} $CHECKBOX_SCORES $CB_PLAYLISTS_State
+	${NSD_GetState} $CHECKBOX_SCREENSHOTS $CB_SCREENSHOTS_State
+	${NSD_GetState} $CHECKBOX_PLAYLISTS $CB_PLAYLISTS_State
 	${NSD_GetState} $CHECKBOX_SONGS  $CB_SONGS_State
 
 	${If} $CB_COVERS_State == "1" ; Remove covers
@@ -333,13 +334,13 @@ Function un.DeleteAll
 	${EndIf}
 
 	${If} $CB_SCREENSHOTS_State == "1" ; Remove screenshots
-		RMDir /r "$INSTDIR\sreenshots"
+		RMDir /r "$INSTDIR\screenshots"
 		SetShellVarContext current
 		RMDir /r "$APPDATA\${exe}\screenshots"
 		SetShellVarContext all
 	${EndIf}
 
-	${If} $CB_SCREENSHOTS_State == "1" ; Remove playlists
+	${If} $CB_PLAYLISTS_State == "1" ; Remove playlists
 		RMDir /r "$INSTDIR\playlists"
 		SetShellVarContext current
 		RMDir /r "$APPDATA\${exe}\playlists"
@@ -370,12 +371,6 @@ Section Install
 	SectionIn RO
 	SetOutPath $INSTDIR
 	SetOverwrite try
-	
-	; make installation folder read/writable for all authenticated users,
-	; so shared settings, songs, logfile,... can be used and overall game handling is easier
-	; TODO: use All Users->AppData for this instead in future releases
-	AccessControl::GrantOnFile \
-	"$INSTDIR\" "(BU)" "GenericRead + GenericExecute + GenericWrite + Delete"
 
 	Call DetermineUserDataDir
 	
