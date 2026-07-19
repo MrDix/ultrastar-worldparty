@@ -275,18 +275,18 @@ begin
   if USongs.Songs.GetLoadProgress().Finished then
   begin
     UIni.Ini.Load();
+    //keep the parsed songs of the static directories on a dynamic-only
+    //rescan and free every discarded song instance
     KeepList := nil;
-    if DynamicOnly then //keep the parsed songs of the static directories, only the dynamic ones are scanned again
-    begin
+    if DynamicOnly then
       KeepList := Classes.TList.Create();
-      for I := 0 to USongs.Songs.SongList.Count - 1 do
-      begin
-        Song := USong.TSong(USongs.Songs.SongList[I]);
-        if Song.InDynamicDir then
-          Song.Free()
-        else
-          KeepList.Add(Song);
-      end;
+    for I := 0 to USongs.Songs.SongList.Count - 1 do
+    begin
+      Song := USong.TSong(USongs.Songs.SongList[I]);
+      if DynamicOnly and (not Song.InDynamicDir) then
+        KeepList.Add(Song)
+      else
+        Song.Free();
     end;
     FreeAndNil(USongs.CatSongs);
     FreeAndNil(USongs.Songs);
