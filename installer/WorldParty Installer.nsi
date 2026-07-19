@@ -7,7 +7,6 @@
 !include LogicLib.nsh		;Used for internal calculations
 !include InstallOptions.nsh	;Used for components selections
 !include nsDialogs.nsh		;Used for custom pages
-!include UAC.nsh			;Used for get privileges to write on disk
 !include FileFunc.nsh 		;used for get size info at uninstaller
 
 ; ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~
@@ -53,9 +52,10 @@ OutFile "dist\${installerexe}.exe"
 InstallDir "${PRODUCT_PATH}"
 InstallDirRegKey "${PRODUCT_UNINST_ROOT_KEY}" "${PRODUCT_UNINST_KEY}" "InstallDir"
 
-; Windows Vista / Windows 7:
-; must be "user" for UAC plugin 
-RequestExecutionLevel user
+; The installer writes to $PROGRAMFILES and HKLM, so it needs admin
+; rights. Let the OS handle the elevation prompt instead of the legacy
+; UAC plugin, which is broken on current systems.
+RequestExecutionLevel admin
 
 ; ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~ ~+~
 ; Interface Settings
@@ -108,14 +108,16 @@ RequestExecutionLevel user
 !define MUI_FINISHPAGE_TEXT "$(page_finish_txt)"
 
 ; MUI_FINISHPAGE_RUN is executed as admin by default.
-; To get the config.ini location right it must be executed with user 
-; rights instead.
+; To get the config.ini location right it must be executed with user
+; rights instead, so launch it through the shell (explorer), which
+; runs unelevated.
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_NOTCHECKED
-!define MUI_FINISHPAGE_RUN_FUNCTION RunAppAsUser 
+!define MUI_FINISHPAGE_RUN_FUNCTION RunAppAsUser
 
-Function RunAppAsUser 
-    UAC::ShellExec 'open' '' '$INSTDIR\${exe}.exe' '' '$INSTDIR'
+Function RunAppAsUser
+    SetOutPath "$INSTDIR"
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\${exe}.exe"'
 FunctionEnd
 
 !define MUI_FINISHPAGE_LINK "$(page_finish_linktxt)"
@@ -163,41 +165,22 @@ Var UseAppData    ; true if APPDATA is used for user data, false for INSTDIR
 Var UserDataPath  ; Path to user data dir (e.g. $INSTDIR)
 Var ConfigIniPath ; Path to config.ini (e.g. "$INSTDIR\config.ini")
 
-; Checks for write permissions on $INSTDIR\config.ini.
-; This function creates $INSTDIR\config.use as a marker file if
-; the user has write permissions.
-; Note: Must be run with user privileges
-Function CheckInstDirUserPermissions
-	ClearErrors
-	; try to open the ini file.
-	; Use "append" mode so an existing config.ini is not destroyed.
-	FileOpen $0 "$INSTDIR\config.ini" a
-	IfErrors end
-	; we have write permissions -> create a marker file
-	FileOpen $1 "$INSTDIR\config.use" a	
-	FileClose $1
-end:
-	FileClose $0
-FunctionEnd
-
 ; Determines the directory used for config.ini and other user
 ; settings and data.
 ; Sets $UseAppData, $UserDataPath and $ConfigIniPath
+; The install dir stays read-only for standard users, so the game
+; runs in global mode and keeps per-user data in AppData.
+; Note: under elevation this resolves to the elevating user's profile.
+; That only affects installer-written defaults and convenience
+; shortcuts; the game itself creates and manages the per-user config
+; of whoever runs it on first launch.
 Function DetermineUserDataDir
-	Delete "$INSTDIR\config.use"
-	!insertmacro UAC.CallFunctionAsUser CheckInstDirUserPermissions
-	IfFileExists "$INSTDIR\config.use" 0 notexists
-	StrCpy $UseAppData false
-	StrCpy $UserDataPath "$INSTDIR"
-	Goto end
-notexists:
 	StrCpy $UseAppData true
 	SetShellVarContext current
 	StrCpy $UserDataPath "$APPDATA\${exe}"
 	SetShellVarContext all
-end:
-	Delete "$INSTDIR\config.use"	
 	StrCpy $ConfigIniPath "$UserDataPath\config.ini"
+	CreateDirectory "$UserDataPath"
 FunctionEnd
 
 Function Settings
@@ -331,8 +314,8 @@ Function un.DeleteAll
 	${NSD_GetState} $CHECKBOX_COVERS $CB_COVERS_State
 	${NSD_GetState} $CHECKBOX_CONFIG $CB_CONFIG_State
 	${NSD_GetState} $CHECKBOX_SCORES $CB_SCORES_State
-	${NSD_GetState} $CHECKBOX_SCORES $CB_SCREENSHOTS_State
-	${NSD_GetState} $CHECKBOX_SCORES $CB_PLAYLISTS_State
+	${NSD_GetState} $CHECKBOX_SCREENSHOTS $CB_SCREENSHOTS_State
+	${NSD_GetState} $CHECKBOX_PLAYLISTS $CB_PLAYLISTS_State
 	${NSD_GetState} $CHECKBOX_SONGS  $CB_SONGS_State
 
 	${If} $CB_COVERS_State == "1" ; Remove covers
@@ -357,13 +340,13 @@ Function un.DeleteAll
 	${EndIf}
 
 	${If} $CB_SCREENSHOTS_State == "1" ; Remove screenshots
-		RMDir /r "$INSTDIR\sreenshots"
+		RMDir /r "$INSTDIR\screenshots"
 		SetShellVarContext current
 		RMDir /r "$APPDATA\${exe}\screenshots"
 		SetShellVarContext all
 	${EndIf}
 
-	${If} $CB_SCREENSHOTS_State == "1" ; Remove playlists
+	${If} $CB_PLAYLISTS_State == "1" ; Remove playlists
 		RMDir /r "$INSTDIR\playlists"
 		SetShellVarContext current
 		RMDir /r "$APPDATA\${exe}\playlists"
@@ -394,12 +377,6 @@ Section Install
 	SectionIn RO
 	SetOutPath $INSTDIR
 	SetOverwrite try
-	
-	; make installation folder read/writable for all authenticated users,
-	; so shared settings, songs, logfile,... can be used and overall game handling is easier
-	; TODO: use All Users->AppData for this instead in future releases
-	AccessControl::GrantOnFile \
-	"$INSTDIR\" "(BU)" "GenericRead + GenericExecute + GenericWrite + Delete"
 
 	Call DetermineUserDataDir
 	
@@ -494,8 +471,6 @@ SectionEnd
 
 Function .onInit
 
-	${UAC.I.Elevate.AdminOnly}
-
 	System::Call 'kernel32::CreateMutexA(i 0, i 0, t "${exe} Installer.exe") ?e'
 
 	Pop $R0
@@ -547,6 +522,9 @@ done:
 
 	!insertmacro MUI_LANGDLL_DISPLAY
 
+	; initialize the user data paths before any page may use them
+	Call DetermineUserDataDir
+
 	!insertmacro INSTALLOPTIONS_EXTRACT_AS ".\settings\settings.ini" "Settings"
 
 FunctionEnd
@@ -583,12 +561,4 @@ continue:
 	
 	!insertmacro MUI_UNGETLANGUAGE
 
-FunctionEnd
-
-Function .onInstFailed
-	${UAC.Unload}
-FunctionEnd
- 
-Function .onInstSuccess
-	${UAC.Unload}
 FunctionEnd
