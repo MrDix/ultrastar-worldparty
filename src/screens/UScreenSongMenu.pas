@@ -715,7 +715,7 @@ begin
 	  SM_Search_new_songs:
 	    begin
         Self.FadeTo(@UGraphic.ScreenMain);
-        UGraphic.ScreenMain.ReloadSongs();
+        UGraphic.ScreenMain.ReloadSongs(true, true); //only the dynamic song directories
       end;
     SM_Extras:
       begin

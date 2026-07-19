@@ -487,14 +487,14 @@ begin
       SDLK_F4: //random song
         if Self.FreeListMode() and (not SlowChessboardScroll()) then
           Self.SelectRandomSong(SDL_ModState = KMOD_LSHIFT);
-      SDLK_F5: //reload songs
+      SDLK_F5: //reload songs: F5 rescans only the dynamic song directories, Shift+F5 everything
         if Self.FreeListMode() then
         begin
           if not Self.Text[Self.SearchTextPlaceholder].Visible then
             Self.ParseInput(SDLK_ESCAPE, 0, true);
 
           Self.FadeTo(@UGraphic.ScreenMain);
-          UGraphic.ScreenMain.ReloadSongs();
+          UGraphic.ScreenMain.ReloadSongs(true, (SDL_ModState and (KMOD_LSHIFT or KMOD_RSHIFT)) = 0);
         end;
       SDLK_F6: //online update songs
         if (not Usongs.CatSongs.Song[Self.Interaction].Main) and Self.FreeListMode() then
