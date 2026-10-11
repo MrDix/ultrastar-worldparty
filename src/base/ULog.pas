@@ -222,7 +222,6 @@ begin
     try
       if not BenchmarkFileOpened then
       begin
-        BenchmarkFileOpened := true;
         AssignFile(BenchmarkFile, LogPath.Append('Benchmark.log').ToNative);
         {$I-}
         Rewrite(BenchmarkFile);
