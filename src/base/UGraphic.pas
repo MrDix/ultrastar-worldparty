@@ -57,6 +57,7 @@ uses
   UScreenOptionsWebcam,
   UScreenOptionsProfiles,
   UScreenOptionsSongdirs,
+  UScreenFolderBrowser,
   UScreenSong,
   UScreenSingController,
   UScreenJukebox,
@@ -149,6 +150,7 @@ var
   ScreenOptionsWebcam:      TScreenOptionsWebcam = nil;
   ScreenOptionsProfiles:    TScreenOptionsProfiles = nil;
   ScreenOptionsSongdirs:    TScreenOptionsSongdirs = nil;
+  ScreenFolderBrowser:      TScreenFolderBrowser = nil;
   ScreenOpen:               TScreenOpen = nil;
   ScreenAbout:              TScreenAbout = nil;
   ScreenDevelopers:         TScreenDevelopers = nil;
@@ -750,6 +752,7 @@ begin
   FreeAndNil(ScreenOptionsWebcam);
   FreeAndNil(ScreenOptionsProfiles);
   FreeAndNil(ScreenOptionsSongdirs);
+  FreeAndNil(ScreenFolderBrowser);
   FreeAndNil(ScreenJukebox);
   FreeAndNil(ScreenJukeboxOptions);
   FreeAndNil(ScreenJukeboxPlaylist);

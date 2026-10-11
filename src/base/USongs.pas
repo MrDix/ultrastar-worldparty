@@ -108,6 +108,7 @@ type
       destructor Destroy(); override;
       function GetLoadProgress(): TProgressSong;
       procedure PreloadCovers(Preload: boolean);
+      procedure StopCoverPreload();
       procedure Sort(OrderType: TSortingType);
   end;
 
@@ -300,8 +301,11 @@ end;
 
 destructor TSongs.Destroy();
 begin
-  RTLeventDestroy(Self.Event);
+  //wake up a paused cover preloading, the inherited destructor waits for the thread
+  Self.Terminate();
+  RtlEventSetEvent(Self.Event);
   inherited;
+  RTLeventDestroy(Self.Event);
 end;
 
 { Search for all files and directories }
@@ -385,10 +389,12 @@ begin
       Self.PreloadCover := true;
       for I := 0 to Self.SongList.Count - 1 do
       begin
-        Song := TSong(Self.SongList.Items[I]);
         if not Self.PreloadCover then
           RtlEventWaitFor(Self.Event);
+        if Self.Terminated then //the songs are about to be freed by a rescan
+          Break;
 
+        Song := TSong(Self.SongList.Items[I]);
         SDL_FreeSurface(UImage.LoadImage(Song.Path.Append(Song.Cover)));
       end;
       Self.ProgressSong.CoversPreload := false;
@@ -409,6 +415,14 @@ begin
   Self.PreloadCover := Preload;
   if Preload then
     RtlEventSetEvent(Self.Event);
+end;
+
+{* Ends the cover preloading of a finished scan and waits for the thread, so its songs can be freed *}
+procedure TSongs.StopCoverPreload();
+begin
+  Self.Terminate();
+  RtlEventSetEvent(Self.Event); //wake up a paused preloading
+  Self.WaitFor();
 end;
 
 (*

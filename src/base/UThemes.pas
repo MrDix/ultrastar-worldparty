@@ -74,6 +74,12 @@ type
     W: integer;
   end;
 
+  //scrolling list whose rows repeat the theme elements of its first row
+  TThemeList = record
+    Rows:    integer; //number of visible rows
+    Spacing: integer; //vertical distance between the tops of two rows
+  end;
+
   TThemeStatic = record
     X:      integer;
     Y:      integer;
@@ -982,27 +988,23 @@ type
   end;
 
   TThemeOptionsSongdirs = class(TThemeBasic)
-    ButtonAdd:              TThemeButton;
     ButtonExit:             TThemeButton;
-    ButtonFolderName:       TThemeButton;
-    FolderButton1:          TThemeButton;
-    FolderNameButton1:      TThemeButton;
-    DelFolderButton1:       TThemeButton;
-    FolderButton2:          TThemeButton;
-    FolderNameButton2:      TThemeButton;
-    DelFolderButton2:       TThemeButton;
-    FolderButton3:          TThemeButton;
-    FolderNameButton3:      TThemeButton;
-    DelFolderButton3:       TThemeButton;
-    FolderButton4:          TThemeButton;
-    FolderNameButton4:      TThemeButton;
-    DelFolderButton4:       TThemeButton;
-    FolderButton5:          TThemeButton;
-    FolderNameButton5:      TThemeButton;
-    DelFolderButton5:       TThemeButton;
-    FolderButton6:          TThemeButton;
-    FolderNameButton6:      TThemeButton;
-    DelFolderButton6:       TThemeButton;
+    ButtonAddStatic:        TThemeButton;
+    ButtonAddDynamic:       TThemeButton;
+    List:                   TThemeList;
+    ListType:               TThemeButton; //type of the folder in the first row
+    ListPath:               TThemeButton; //path of the folder in the first row
+    ListDelete:             TThemeButton; //delete button of the first row
+    ListScrollText:         TThemeText;   //position in a list longer than the visible rows
+  end;
+
+  TThemeFolderBrowser = class(TThemeBasic)
+    TextTitle:              TThemeText;   //title given by the screen that opens the browser
+    ButtonExit:             TThemeButton;
+    ButtonPath:             TThemeButton; //editable path of the shown folder
+    List:                   TThemeList;
+    ListRow:                TThemeButton; //first row of the folder list
+    ListScrollText:         TThemeText;   //position in a list longer than the visible rows
   end;
 
   //Error- and Check-Popup
@@ -1350,7 +1352,8 @@ type
     OptionsWebcam:          TThemeOptionsWebcam;
     OptionsProfiles:        TThemeOptionsProfiles;
     OptionsSongdirs:        TThemeOptionsSongdirs;
-	
+    FolderBrowser:          TThemeFolderBrowser;
+
     //error and check popup
     ErrorPopup:             TThemeError;
     CheckPopup:             TThemeCheck;
@@ -1407,6 +1410,7 @@ type
     procedure ThemeLoadEqualizer(var ThemeEqualizer: TThemeEqualizer; const Name: string);
     procedure ThemeLoadLyricBar(var ThemeLyricBar: TThemeLyricBar; Name: string);
     procedure ThemeLoadPosition(var ThemePosition: TThemePosition; const Name: string);
+    procedure ThemeLoadList(var ThemeList: TThemeList; const Name: string);
     procedure ThemeScoreLoad;
     procedure ThemePartyLoad;
     procedure ThemeSongLoad;
@@ -2310,28 +2314,24 @@ begin
 	    ThemeLoadButton(OptionsProfiles.ButtonExit,              'OptionsProfilesButtonExit');
 
       //Options Songdirs
-	    ThemeLoadBasic(OptionsSongdirs,                         'OptionsSongdirs');
-	    ThemeLoadButton(OptionsSongdirs.ButtonAdd,              'OptionsSongdirsButtonAdd');
-	    ThemeLoadButton(OptionsSongdirs.ButtonExit,             'OptionsSongdirsButtonExit');
-	    ThemeLoadButton(OptionsSongdirs.ButtonFolderName,       'OptionsSongdirsButtonFolderName');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton1,          'OptionsSongdirsFolderButton1');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton1,      'OptionsSongdirsFolderNameButton1');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton1,       'OptionsSongdirsDeleteFolderButton1');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton2,          'OptionsSongdirsFolderButton2');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton2,      'OptionsSongdirsFolderNameButton2');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton2,       'OptionsSongdirsDeleteFolderButton2');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton3,          'OptionsSongdirsFolderButton3');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton3,      'OptionsSongdirsFolderNameButton3');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton3,       'OptionsSongdirsDeleteFolderButton3');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton4,          'OptionsSongdirsFolderButton4');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton4,      'OptionsSongdirsFolderNameButton4');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton4,       'OptionsSongdirsDeleteFolderButton4');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton5,          'OptionsSongdirsFolderButton5');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton5,      'OptionsSongdirsFolderNameButton5');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton5,       'OptionsSongdirsDeleteFolderButton5');
-	    ThemeLoadButton(OptionsSongdirs.FolderButton6,          'OptionsSongdirsFolderButton6');
-	    ThemeLoadButton(OptionsSongdirs.FolderNameButton6,      'OptionsSongdirsFolderNameButton6');
-	    ThemeLoadButton(OptionsSongdirs.DelFolderButton6,       'OptionsSongdirsDeleteFolderButton6');
+      ThemeLoadBasic(OptionsSongdirs,                            'OptionsSongdirs');
+      ThemeLoadButton(OptionsSongdirs.ButtonExit,                'OptionsSongdirsButtonExit');
+      ThemeLoadButton(OptionsSongdirs.ButtonAddStatic,           'OptionsSongdirsButtonAddStatic');
+      ThemeLoadButton(OptionsSongdirs.ButtonAddDynamic,          'OptionsSongdirsButtonAddDynamic');
+      Self.ThemeLoadList(OptionsSongdirs.List,                   'OptionsSongdirsList');
+      ThemeLoadButton(OptionsSongdirs.ListType,                  'OptionsSongdirsListType');
+      ThemeLoadButton(OptionsSongdirs.ListPath,                  'OptionsSongdirsListPath');
+      ThemeLoadButton(OptionsSongdirs.ListDelete,                'OptionsSongdirsListDelete');
+      ThemeLoadText(OptionsSongdirs.ListScrollText,              'OptionsSongdirsListScrollText');
+
+      //Folder browser
+      ThemeLoadBasic(FolderBrowser,                              'FolderBrowser');
+      ThemeLoadText(FolderBrowser.TextTitle,                     'FolderBrowserTextTitle');
+      ThemeLoadButton(FolderBrowser.ButtonExit,                  'FolderBrowserButtonExit');
+      ThemeLoadButton(FolderBrowser.ButtonPath,                  'FolderBrowserButtonPath');
+      Self.ThemeLoadList(FolderBrowser.List,                     'FolderBrowserList');
+      ThemeLoadButton(FolderBrowser.ListRow,                     'FolderBrowserListRow');
+      ThemeLoadText(FolderBrowser.ListScrollText,                'FolderBrowserListScrollText');
 
       //error popup
       ThemeLoadBasic (ErrorPopup,                               'ErrorPopup');
@@ -2932,6 +2932,14 @@ begin
   Self.ReadProperty(Name, 'W', 0, ThemePosition.W);
   Self.ReadProperty(Name, 'X', 0, ThemePosition.X);
   Self.ReadProperty(Name, 'Y', 0, ThemePosition.Y);
+end;
+
+procedure TTheme.ThemeLoadList(var ThemeList: TThemeList; const Name: string);
+begin
+  Self.SetInheritance(Name);
+  Self.ReadProperty(Name, 'Rows', 1, ThemeList.Rows);
+  Self.ReadProperty(Name, 'Spacing', 0, ThemeList.Spacing);
+  ThemeList.Rows := Max(ThemeList.Rows, 1);
 end;
 
 procedure TTheme.LoadColors;
@@ -3947,6 +3955,7 @@ begin
   Self.OptionsWebcam := TThemeOptionsWebcam.Create();
   Self.OptionsProfiles := TThemeOptionsProfiles.Create();
   Self.OptionsSongdirs := TThemeOptionsSongdirs.Create();
+  Self.FolderBrowser := TThemeFolderBrowser.Create();
   Self.ErrorPopup := TThemeError.Create();
   Self.CheckPopup := TThemeCheck.Create();
   Self.InsertUserPopup := TThemeInsertUser.Create();

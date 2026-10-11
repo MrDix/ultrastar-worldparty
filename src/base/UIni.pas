@@ -83,6 +83,15 @@ type
   TBackgroundMusicOption = (bmoOff, bmoOn);
   TSongMenuMode = (smRoulette, smChessboard, smCarousel, smSlotMachine, smSlide, smList, smCompactList, smMosaic);
 
+  {**
+   * A song directory of the [Directories] section of the configuration.
+   *}
+  TSongDirEntry = record
+    Path:    IPath;
+    Dynamic: boolean; //**< true for a DynamicSongDirN key, false for a SongDirN key
+  end;
+  TSongDirEntries = array of TSongDirEntry;
+
   TIni = class
     private
       function ExtractKeyIndex(const Key, Prefix, Suffix: string): integer;
@@ -116,6 +125,9 @@ type
 
       //Filename of the opened iniFile
       Filename:       IPath;
+
+      // song directories of the [Directories] section, in file order
+      SongDirs:       TSongDirEntries;
 
       // General
       Players:        integer;
@@ -249,7 +261,9 @@ type
       procedure SaveJukeboxRandomMode();
       procedure SaveJukeboxOrderMode();
       procedure SaveJukeboxShowLyrics();
-      procedure SaveSongdirs();
+      { Replaces the song directories of the configuration.
+        @return (@true when the configuration was written, @false otherwise) }
+      function SaveSongDirs(const Entries: TSongDirEntries): boolean;
 
       { Sets resolution.
         @return (@true when resolution was added, @false otherwise) }
@@ -651,19 +665,40 @@ procedure TIni.LoadPaths(IniFile: TCustomIniFile);
 var
   PathStrings: TStringList;
   I: integer;
-  DisabledDir: string;
+  DisabledDir, Key, Value: string;
+
+  procedure AddSongDir(IsDynamic: boolean);
+  begin
+    if (Trim(Value) = '') then
+      Exit;
+    SetLength(Self.SongDirs, Length(Self.SongDirs) + 1);
+    Self.SongDirs[High(Self.SongDirs)].Path := UPath.Path(Value);
+    Self.SongDirs[High(Self.SongDirs)].Dynamic := IsDynamic;
+  end;
+
 begin
   UPathUtils.InitializeSongPaths();
+  SetLength(Self.SongDirs, 0);
   DisabledDir := '';
   PathStrings := TStringList.Create();
   IniFile.ReadSection('Directories', PathStrings);
   for I := 0 to PathStrings.Count - 1 do
-    if (Pos('SONGDIR', UpperCase(PathStrings[I])) = 1) then
-      UPathUtils.AddSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')),false)
-    else if (Pos('DYNAMICSONGDIR', UpperCase(PathStrings[I])) = 1) then
-      UPathUtils.AddDynamicSongPath(UPath.Path(IniFile.ReadString('Directories', PathStrings[I], '')))
-    else if (UpperCase(PathStrings[I]) = 'DISABLEDSONGDIR') then
-      DisabledDir := IniFile.ReadString('Directories', PathStrings[I], '');
+  begin
+    Key := UpperCase(PathStrings[I]);
+    Value := IniFile.ReadString('Directories', PathStrings[I], '');
+    if (Pos('SONGDIR', Key) = 1) then
+    begin
+      UPathUtils.AddSongPath(UPath.Path(Value), false);
+      AddSongDir(false);
+    end
+    else if (Pos('DYNAMICSONGDIR', Key) = 1) then
+    begin
+      UPathUtils.AddDynamicSongPath(UPath.Path(Value));
+      AddSongDir(true);
+    end
+    else if (Key = 'DISABLEDSONGDIR') then
+      DisabledDir := Value;
+  end;
 
   // set after the loop so the overlap check sees all scanned directories
   if (DisabledDir <> '') then
@@ -1513,34 +1548,67 @@ begin
   end;
 end;
 
-procedure TIni.SaveSongdirs;
+function TIni.SaveSongDirs(const Entries: TSongDirEntries): boolean;
 var
-  I, J: integer;
+  I, StaticCount, DynamicCount: integer;
   IniFile: TIniFile;
-  CurrentPath: IPath;
+  Key: string;
   PathStrings: TStringList;
 begin
-  if not Filename.IsReadOnly() then
+  Result := false;
+  if Filename.IsReadOnly() then
   begin
-    IniFile := TIniFile.Create(Filename.ToNative);
-
-    //Delete all Songdirs in file
-    PathStrings := TStringList.Create();
-    IniFile.ReadSection('Directories', PathStrings);
-    for I := 0 to PathStrings.Count - 1 do
-      if (Pos('SONGDIR', UpperCase(PathStrings[I])) = 1) then
-        IniFile.DeleteKey('Directories', PathStrings[I]);
-
-    // Save new Songdirs
-    for I := 0 to UPathUtils.SongPaths.Count-1 do
-    begin
-      J := I + 1;
-      CurrentPath := UPathUtils.SongPaths[I] as IPath;
-      IniFile.WriteString('Directories', 'SongDir' + J.ToString(), CurrentPath.GetPath().ToUTF8());
-    end;
-
-    IniFile.Free;
+    Log.LogError('Configuration is read-only: ' + Filename.ToNative, 'TIni.SaveSongDirs');
+    Exit;
   end;
+
+  try
+    IniFile := TIniFile.Create(Filename.ToNative);
+    try
+      IniFile.CacheUpdates := true;
+
+      // replace all song directories, commented out keys are kept
+      PathStrings := TStringList.Create();
+      try
+        IniFile.ReadSection('Directories', PathStrings);
+        for I := 0 to PathStrings.Count - 1 do
+        begin
+          Key := UpperCase(PathStrings[I]);
+          if (Pos('SONGDIR', Key) = 1) or (Pos('DYNAMICSONGDIR', Key) = 1) then
+            IniFile.DeleteKey('Directories', PathStrings[I]);
+        end;
+      finally
+        PathStrings.Free();
+      end;
+
+      StaticCount := 0;
+      DynamicCount := 0;
+      for I := 0 to High(Entries) do
+        if Entries[I].Dynamic then
+        begin
+          Inc(DynamicCount);
+          IniFile.WriteString('Directories', 'DynamicSongDir' + IntToStr(DynamicCount), Entries[I].Path.ToUTF8());
+        end
+        else
+        begin
+          Inc(StaticCount);
+          IniFile.WriteString('Directories', 'SongDir' + IntToStr(StaticCount), Entries[I].Path.ToUTF8());
+        end;
+
+      IniFile.UpdateFile();
+    finally
+      IniFile.Free();
+    end;
+  except
+    on E: Exception do
+    begin
+      Log.LogError('Could not save the song directories: ' + E.Message, 'TIni.SaveSongDirs');
+      Exit;
+    end;
+  end;
+
+  Self.SongDirs := Copy(Entries, 0, Length(Entries));
+  Result := true;
 end;
 
 function TIni.SetResolution(ResolutionString: string; RemoveCurrent: boolean; NoSave: boolean): boolean;
