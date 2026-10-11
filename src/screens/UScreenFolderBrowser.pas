@@ -405,9 +405,11 @@ begin
     Exit;
   end;
 
+  {$IFDEF MSWINDOWS}
   // "C:" would be the current directory of drive C
   if (Typed[Length(Typed)] = ':') then
     Typed := Typed + PathDelim;
+  {$ENDIF}
   Folder := NormalizeFolder(Path(Typed));
   if not Self.ShowFolder(Folder, PATH_NONE) then
     UGraphic.ScreenPopupError.ShowPopup(ULanguage.Language.Translate('SING_FOLDER_BROWSER_NOT_FOUND'));

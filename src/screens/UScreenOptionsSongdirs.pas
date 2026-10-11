@@ -120,6 +120,16 @@ begin
     UGraphic.ScreenOptionsSongdirs.DeleteDir(PtrInt(Data));
 end;
 
+// leaves the screen without the changes that could not be saved
+procedure OnDiscardConfirmed(Value: boolean; Data: Pointer);
+begin
+  if Value then
+  begin
+    UGraphic.ScreenOptionsSongdirs.Changed := false;
+    UGraphic.ScreenOptionsSongdirs.ExitScreen();
+  end;
+end;
+
 constructor TScreenOptionsSongdirs.Create;
 var
   Row: integer;
@@ -471,10 +481,15 @@ procedure TScreenOptionsSongdirs.ExitScreen();
 begin
   if Self.Changed then
   begin
-    if UIni.Ini.SaveSongDirs(Self.ConfiguredDirs()) then
-      UGraphic.ScreenMain.RequestReloadSongs(not Self.StaticChanged)
-    else
-      UGraphic.ScreenPopupError.ShowPopup(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_SAVE_FAILED'));
+    // keep the changes on the screen unless the user discards them, e.g. a
+    // read-only configuration could not be saved on any later attempt
+    if not UIni.Ini.SaveSongDirs(Self.ConfiguredDirs()) then
+    begin
+      UGraphic.ScreenPopupCheck.ShowPopup(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_SAVE_FAILED'),
+        @OnDiscardConfirmed, nil, false);
+      Exit;
+    end;
+    UGraphic.ScreenMain.RequestReloadSongs(not Self.StaticChanged);
     Self.Changed := false;
   end;
   Self.FadeTo(@UGraphic.ScreenOptions, UMusic.SoundLib.Back);
