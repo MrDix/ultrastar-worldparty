@@ -30,444 +30,590 @@ interface
 {$I switches.inc}
 
 uses
-  Classes,
-  UCommon,
   sdl2,
-  UMenu,
-  UDisplay,
-  UMusic,
-  UFiles,
   UIni,
-  UThemes,
-  UPathUtils,
-  UPath,
-  UScreenMain,
-  USongs,
-  UTexture;
+  UMenu,
+  UPath;
 
 type
+  TSongDirKind = (sdkBuiltin, sdkStatic, sdkDynamic);
 
-  TScreenOptionsSongdirs = class(TMenu)
-    private
-      SongPathList: IInterfaceList;
-      MakeSongPathList: array[0..5] of boolean;
-      fDirname: IPath;
-      FolderName, DefaultSongdir, AddFolderButton, ExitButton: integer;
-      DirButton: array[1..6] of integer;
-      NumFolders, CurrentFolderSelected: integer;
-      bMaxDir, bChange: boolean;
-
-    public
-      constructor Create; override;
-      function ParseMouse(MouseButton: integer; BtnDown: boolean; X, Y: integer): boolean; override;
-      function ParseInput(PressedKey: cardinal; CharCode: UCS4Char; PressedDown: boolean): boolean; override;
-      procedure OnShow; override;
-      procedure AddFolder(bCreateDir: boolean);
-      procedure DelFolder;
-      procedure SaveFolders;
-      procedure ShiftFolders(Current: integer);
-      procedure ExitSongdirs;
-      procedure LoadFolders(CreateButtons: boolean);
+  TSongDir = record
+    Path:    IPath;
+    Kind:    TSongDirKind;
+    Missing: boolean; //the folder did not exist when it was listed
   end;
 
-const
-  MAX_DIR = 6;
-  MAX_LENGTH = 50;
+  TSongDirColumn = (scType, scPath, scDelete);
+
+  TSongDirsFocus = (sfExit, sfList, sfAddStatic, sfAddDynamic);
+
+  { Lists the song folders and lets the user add, change and remove them }
+  TScreenOptionsSongdirs = class(TMenu)
+    private
+      Dirs: array of TSongDir; //built-in folders first, then the configured ones
+      DirIndex: integer;       //selected folder
+      FirstDir: integer;       //folder shown in the first row
+      Column: TSongDirColumn;
+      Focus: TSongDirsFocus;
+      Changed, StaticChanged: boolean;
+      Browsing: boolean;       //the folder browser was opened by this screen
+      BrowseIndex: integer;    //folder changed in the browser, -1 to add one
+      BrowseKind: TSongDirKind;
+      ChosenFolder: IPath;     //folder chosen in the browser, PATH_NONE if cancelled
+      ButtonExit, ButtonAddStatic, ButtonAddDynamic, TextScroll: integer;
+      TypeButtons, PathButtons, DeleteButtons: array of integer;
+      procedure AddDir(const DirPath: IPath; Kind: TSongDirKind);
+      procedure LoadDirs();
+      function ConfiguredDirs(): TSongDirEntries;
+      function CheckFolder(const Folder: IPath; IgnoreIndex: integer; out Error: UTF8String): boolean;
+      procedure MarkChanged(Kind: TSongDirKind);
+      procedure OpenBrowser(Index: integer; Kind: TSongDirKind);
+      procedure OnFolderChosen(const Folder: IPath);
+      procedure ApplyChosenFolder();
+      procedure ToggleKind(Index: integer);
+      procedure ConfirmDelete(Index: integer);
+      procedure DeleteDir(Index: integer);
+      procedure Activate();
+      procedure SelectDir(Index: integer);
+      procedure SetFocus(NewFocus: TSongDirsFocus);
+      procedure UpdateList();
+      procedure ExitScreen();
+    public
+      constructor Create; override;
+      function ParseInput(PressedKey: cardinal; CharCode: UCS4Char; PressedDown: boolean): boolean; override;
+      function ParseMouse(MouseButton: integer; BtnDown: boolean; X, Y: integer): boolean; override;
+      procedure OnShow; override;
+  end;
 
 implementation
 
 uses
+  Math,
+  SysUtils,
+  TextGL,
+  UCommon,
   UGraphic,
-  UUnicodeUtils,
-  USkins,
-  SysUtils;
+  ULanguage,
+  UMenuButton,
+  UMusic,
+  UPathUtils,
+  UScreenFolderBrowser,
+  UThemes;
 
-procedure OnFolderNotExist(Value: boolean; Data: Pointer);
-var
-  bMakedir: boolean;
+const
+  KIND_NAMES: array[TSongDirKind] of string = (
+    'SING_OPTIONS_SONGDIRS_TYPE_BUILTIN',
+    'SING_OPTIONS_SONGDIRS_TYPE_STATIC',
+    'SING_OPTIONS_SONGDIRS_TYPE_DYNAMIC');
+
+// shortens a path to the width of the error popup text
+function PopupPath(const PathText: UTF8String): UTF8String;
 begin
-  Display.CheckOK := Value;
-  if (Value) then
-  begin
-    Display.CheckOK := false;
+  Result := FitTextToWidth(PathText, UThemes.Theme.ErrorPopup.TextError.W,
+    UThemes.Theme.ErrorPopup.TextError.Font, UThemes.Theme.ErrorPopup.TextError.Size, teMiddle);
+end;
 
-    //Make folder
-    if ScreenOptionsSongdirs.fDirname.Equals(PATH_NONE()) or not ScreenOptionsSongdirs.fDirname.CreateDirectory(true) then
-      Exit;
-    bMakedir := true;
+procedure OnDeleteConfirmed(Value: boolean; Data: Pointer);
+begin
+  if Value then
+    UGraphic.ScreenOptionsSongdirs.DeleteDir(PtrInt(Data));
+end;
+
+// leaves the screen without the changes that could not be saved
+procedure OnDiscardConfirmed(Value: boolean; Data: Pointer);
+begin
+  if Value then
+  begin
+    UGraphic.ScreenOptionsSongdirs.Changed := false;
+    UGraphic.ScreenOptionsSongdirs.ExitScreen();
+  end;
+end;
+
+constructor TScreenOptionsSongdirs.Create;
+var
+  Row: integer;
+  TypeTheme, PathTheme, DeleteTheme: TThemeButton;
+begin
+  inherited Create;
+
+  Self.LoadFromTheme(UThemes.Theme.OptionsSongdirs);
+  Self.TextScroll := Self.AddText(UThemes.Theme.OptionsSongdirs.ListScrollText);
+  Self.ButtonExit := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonExit);
+
+  // the rows repeat the first row of the theme
+  TypeTheme := UThemes.Theme.OptionsSongdirs.ListType;
+  PathTheme := UThemes.Theme.OptionsSongdirs.ListPath;
+  DeleteTheme := UThemes.Theme.OptionsSongdirs.ListDelete;
+  SetLength(Self.TypeButtons, UThemes.Theme.OptionsSongdirs.List.Rows);
+  SetLength(Self.PathButtons, Length(Self.TypeButtons));
+  SetLength(Self.DeleteButtons, Length(Self.TypeButtons));
+  for Row := 0 to High(Self.TypeButtons) do
+  begin
+    Self.TypeButtons[Row] := Self.AddButton(TypeTheme);
+    if (Length(Self.Button[Self.TypeButtons[Row]].Text) = 0) then
+      Self.AddButtonText(10, 5, '');
+    Self.PathButtons[Row] := Self.AddButton(PathTheme);
+    if (Length(Self.Button[Self.PathButtons[Row]].Text) = 0) then
+      Self.AddButtonText(10, 5, '');
+    Self.DeleteButtons[Row] := Self.AddButton(DeleteTheme);
+    TypeTheme.Y := TypeTheme.Y + UThemes.Theme.OptionsSongdirs.List.Spacing;
+    PathTheme.Y := PathTheme.Y + UThemes.Theme.OptionsSongdirs.List.Spacing;
+    DeleteTheme.Y := DeleteTheme.Y + UThemes.Theme.OptionsSongdirs.List.Spacing;
+  end;
+
+  Self.ButtonAddStatic := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonAddStatic);
+  Self.ButtonAddDynamic := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonAddDynamic);
+
+  Self.ChosenFolder := PATH_NONE;
+end;
+
+procedure TScreenOptionsSongdirs.OnShow;
+begin
+  inherited;
+
+  if Self.Browsing then
+  begin
+    // back from the folder browser, keep the unsaved changes
+    Self.Browsing := false;
+    Self.ApplyChosenFolder();
   end
   else
   begin
-    bMakedir := false;
+    Self.LoadDirs();
+    Self.Changed := false;
+    Self.StaticChanged := false;
+    Self.DirIndex := 0;
+    Self.FirstDir := 0;
+    Self.Column := scPath;
+    Self.Focus := sfList;
+    if (Length(Self.Dirs) = 0) then
+      Self.Focus := sfAddStatic;
   end;
-  //Clean folder name entry text
-  ScreenOptionsSongdirs.Button[ScreenOptionsSongdirs.FolderName].Text[0].Text := '';
-  ScreenOptionsSongdirs.Button[ScreenOptionsSongdirs.FolderName].Text[1].Visible := true;
-  ScreenOptionsSongdirs.AddFolder(bMakedir);
+  Self.UpdateList();
 end;
 
-function TScreenOptionsSongdirs.ParseMouse(MouseButton: integer; BtnDown: boolean; X, Y: integer): boolean;
+procedure TScreenOptionsSongdirs.AddDir(const DirPath: IPath; Kind: TSongDirKind);
+begin
+  SetLength(Self.Dirs, Length(Self.Dirs) + 1);
+  Self.Dirs[High(Self.Dirs)].Path := DirPath;
+  Self.Dirs[High(Self.Dirs)].Kind := Kind;
+  Self.Dirs[High(Self.Dirs)].Missing := not DirPath.IsDirectory();
+end;
+
+procedure TScreenOptionsSongdirs.LoadDirs();
 var
   I: integer;
 begin
-  inherited ParseMouse(MouseButton, BtnDown, X, Y);
-  Self.TransferMouseCords(X, Y);
-  Result := true;
+  SetLength(Self.Dirs, 0);
+  if Assigned(UPathUtils.BuiltinSongPaths) then
+    for I := 0 to UPathUtils.BuiltinSongPaths.Count - 1 do
+      Self.AddDir(NormalizeFolder(UPathUtils.BuiltinSongPaths[I] as IPath), sdkBuiltin);
+  for I := 0 to High(UIni.Ini.SongDirs) do
+    if UIni.Ini.SongDirs[I].Dynamic then
+      Self.AddDir(UIni.Ini.SongDirs[I].Path, sdkDynamic)
+    else
+      Self.AddDir(UIni.Ini.SongDirs[I].Path, sdkStatic);
+end;
 
-  for I := 1 to Self.NumFolders do
-  begin
-    // Folder path hover
-    if InRegion(X, Y, Button[Self.DirButton[I] + 1].GetMouseOverArea) then
+function TScreenOptionsSongdirs.ConfiguredDirs(): TSongDirEntries;
+var
+  I: integer;
+begin
+  SetLength(Result, 0);
+  for I := 0 to High(Self.Dirs) do
+    if (Self.Dirs[I].Kind <> sdkBuiltin) then
     begin
-      if (Self.CurrentFolderSelected > Self.FolderName) then
-      begin
-        Self.Button[Self.CurrentFolderSelected].SetSelect(false);   // Deselect last selected folder.
-        Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
-      end;
-      Self.CurrentFolderSelected := Self.DirButton[I] + 1;
-      Self.Button[Self.CurrentFolderSelected].SetSelect(true);
-      if (Self.DirButton[1] <> Self.CurrentFolderSelected - 1) then
-        Self.Button[Self.CurrentFolderSelected + 1].Visible := true;
-      if (Length(Self.Button[Self.FolderName].Text[0].Text) = 0) then
-      begin
-        Self.Button[Self.FolderName].Text[1].Visible := true;
-      end;
-      Break;
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)].Path := Self.Dirs[I].Path;
+      Result[High(Result)].Dynamic := (Self.Dirs[I].Kind = sdkDynamic);
     end;
-    // Folder img hover
-    if InRegion(X, Y, Button[Self.DirButton[I]].GetMouseOverArea) then
+end;
+
+{ A folder must not overlap another song folder or the trash folder, its songs
+  would be loaded twice or disabled songs would come back. }
+function TScreenOptionsSongdirs.CheckFolder(const Folder: IPath; IgnoreIndex: integer; out Error: UTF8String): boolean;
+var
+  I: integer;
+begin
+  Result := false;
+  Error := '';
+  for I := 0 to High(Self.Dirs) do
+    if (I <> IgnoreIndex) and PathsOverlap(Folder, Self.Dirs[I].Path) then
     begin
-      if (Length(Self.Button[Self.FolderName].Text[0].Text) = 0) then
-      begin
-        Self.Button[Self.FolderName].Text[1].Visible := true;
-      end;
-      Break;
+      if Folder.Equals(Self.Dirs[I].Path) then
+        Error := ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_ALREADY_ADDED')
+      else
+        Error := Format(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_OVERLAP'), [PopupPath(Self.Dirs[I].Path.ToUTF8())]);
+      Exit;
+    end;
+
+  if PathsOverlap(Folder, UPathUtils.DisabledSongPath) then
+  begin
+    Error := ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_OVERLAP_TRASH');
+    Exit;
+  end;
+  Result := true;
+end;
+
+procedure TScreenOptionsSongdirs.MarkChanged(Kind: TSongDirKind);
+begin
+  Self.Changed := true;
+  // only changes of dynamic folders can be applied by a dynamic-only rescan
+  if (Kind <> sdkDynamic) then
+    Self.StaticChanged := true;
+end;
+
+procedure TScreenOptionsSongdirs.OpenBrowser(Index: integer; Kind: TSongDirKind);
+var
+  Folder: IPath;
+  Title: UTF8String;
+begin
+  Self.Browsing := true;
+  Self.BrowseIndex := Index;
+  Self.BrowseKind := Kind;
+  Self.ChosenFolder := PATH_NONE;
+
+  // show the changed folder or, for a new one, the last folder of the list
+  Folder := PATH_NONE;
+  if (Index >= 0) then
+  begin
+    Folder := Self.Dirs[Index].Path;
+    Title := ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_CHANGE');
+  end
+  else
+  begin
+    if (Length(Self.Dirs) > 0) then
+      Folder := Self.Dirs[High(Self.Dirs)].Path;
+    if (Kind = sdkDynamic) then
+      Title := ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_ADD_DYNAMIC')
+    else
+      Title := ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_ADD_STATIC');
+  end;
+
+  if not Assigned(UGraphic.ScreenFolderBrowser) then
+    UGraphic.ScreenFolderBrowser := TScreenFolderBrowser.Create();
+  UGraphic.ScreenFolderBrowser.Browse(Title, Folder, @UGraphic.ScreenOptionsSongdirs, @Self.OnFolderChosen);
+  Self.FadeTo(@UGraphic.ScreenFolderBrowser, UMusic.SoundLib.Start);
+end;
+
+procedure TScreenOptionsSongdirs.OnFolderChosen(const Folder: IPath);
+begin
+  Self.ChosenFolder := Folder;
+end;
+
+procedure TScreenOptionsSongdirs.ApplyChosenFolder();
+var
+  Error: UTF8String;
+begin
+  // cancelled
+  if Self.ChosenFolder.IsUnset() then
+    Exit;
+
+  if not Self.CheckFolder(Self.ChosenFolder, Self.BrowseIndex, Error) then
+  begin
+    UGraphic.ScreenPopupError.ShowPopup(Error);
+    Exit;
+  end;
+
+  if (Self.BrowseIndex >= 0) then
+  begin
+    if Self.Dirs[Self.BrowseIndex].Path.Equals(Self.ChosenFolder) then
+      Exit;
+    Self.Dirs[Self.BrowseIndex].Path := Self.ChosenFolder;
+    Self.Dirs[Self.BrowseIndex].Missing := false;
+    Self.MarkChanged(Self.Dirs[Self.BrowseIndex].Kind);
+    Self.DirIndex := Self.BrowseIndex;
+  end
+  else
+  begin
+    Self.AddDir(Self.ChosenFolder, Self.BrowseKind);
+    Self.MarkChanged(Self.BrowseKind);
+    Self.DirIndex := High(Self.Dirs);
+  end;
+  Self.Column := scPath;
+  Self.Focus := sfList;
+end;
+
+procedure TScreenOptionsSongdirs.ToggleKind(Index: integer);
+begin
+  // switching moves the folder in or out of the static library
+  if (Self.Dirs[Index].Kind = sdkStatic) then
+    Self.Dirs[Index].Kind := sdkDynamic
+  else
+    Self.Dirs[Index].Kind := sdkStatic;
+  Self.MarkChanged(sdkStatic);
+  Self.UpdateList();
+end;
+
+procedure TScreenOptionsSongdirs.ConfirmDelete(Index: integer);
+begin
+  UGraphic.ScreenPopupCheck.ShowPopup(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_DELETE_CONFIRM'),
+    @OnDeleteConfirmed, Pointer(PtrInt(Index)), false);
+end;
+
+procedure TScreenOptionsSongdirs.DeleteDir(Index: integer);
+var
+  I: integer;
+begin
+  if (Index < 0) or (Index > High(Self.Dirs)) or (Self.Dirs[Index].Kind = sdkBuiltin) then
+    Exit;
+
+  Self.MarkChanged(Self.Dirs[Index].Kind);
+  for I := Index to High(Self.Dirs) - 1 do
+    Self.Dirs[I] := Self.Dirs[I + 1];
+  SetLength(Self.Dirs, Length(Self.Dirs) - 1);
+
+  if (Length(Self.Dirs) = 0) then
+    Self.SetFocus(sfAddStatic)
+  else
+    Self.SelectDir(Min(Index, High(Self.Dirs)));
+end;
+
+// runs the action of the selected element
+procedure TScreenOptionsSongdirs.Activate();
+begin
+  case Self.Focus of
+    sfExit:
+      Self.ExitScreen();
+    sfAddStatic:
+      Self.OpenBrowser(-1, sdkStatic);
+    sfAddDynamic:
+      Self.OpenBrowser(-1, sdkDynamic);
+    sfList:
+      if (Self.Dirs[Self.DirIndex].Kind = sdkBuiltin) then
+        UGraphic.ScreenPopupInfo.ShowPopup(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_BUILTIN_INFO'))
+      else
+        case Self.Column of
+          scType:
+            Self.ToggleKind(Self.DirIndex);
+          scPath:
+            Self.OpenBrowser(Self.DirIndex, Self.Dirs[Self.DirIndex].Kind);
+          scDelete:
+            Self.ConfirmDelete(Self.DirIndex);
+        end;
+  end;
+end;
+
+procedure TScreenOptionsSongdirs.SelectDir(Index: integer);
+begin
+  if (Length(Self.Dirs) = 0) then
+    Exit;
+  Self.DirIndex := EnsureRange(Index, 0, High(Self.Dirs));
+  Self.SetFocus(sfList);
+end;
+
+procedure TScreenOptionsSongdirs.SetFocus(NewFocus: TSongDirsFocus);
+begin
+  if (NewFocus = sfList) and (Length(Self.Dirs) = 0) then
+    NewFocus := sfAddStatic;
+  Self.Focus := NewFocus;
+  Self.UpdateList();
+end;
+
+procedure TScreenOptionsSongdirs.UpdateList();
+var
+  Row, Index, Rows: integer;
+  PathButton: TButton;
+  PathText, Suffix: UTF8String;
+  Margin: real;
+begin
+  Rows := Length(Self.PathButtons);
+  // keep the selected folder visible
+  if (Self.DirIndex < Self.FirstDir) then
+    Self.FirstDir := Self.DirIndex
+  else if (Self.DirIndex >= Self.FirstDir + Rows) then
+    Self.FirstDir := Self.DirIndex - Rows + 1;
+  Self.FirstDir := EnsureRange(Self.FirstDir, 0, Max(Length(Self.Dirs) - Rows, 0));
+
+  for Row := 0 to Rows - 1 do
+  begin
+    Index := Self.FirstDir + Row;
+    Self.Button[Self.TypeButtons[Row]].Visible := (Index < Length(Self.Dirs));
+    Self.Button[Self.PathButtons[Row]].Visible := (Index < Length(Self.Dirs));
+    Self.Button[Self.DeleteButtons[Row]].Visible := (Index < Length(Self.Dirs)) and (Self.Dirs[Index].Kind <> sdkBuiltin);
+    if (Index >= Length(Self.Dirs)) then
+      Continue;
+
+    Self.Button[Self.TypeButtons[Row]].Text[0].Text := ULanguage.Language.Translate(KIND_NAMES[Self.Dirs[Index].Kind]);
+
+    // the hint for a missing folder stays visible, the path is shortened
+    PathButton := Self.Button[Self.PathButtons[Row]];
+    Suffix := '';
+    if Self.Dirs[Index].Missing then
+      Suffix := ' ' + ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_NOT_FOUND');
+    TextGL.SetFontStyle(PathButton.Text[0].Style);
+    TextGL.SetFontSize(PathButton.Text[0].Size);
+    Margin := PathButton.Text[0].X - PathButton.X;
+    PathText := FitTextToWidth(Self.Dirs[Index].Path.ToUTF8(), PathButton.W - 2 * Margin - TextGL.glTextWidth(Suffix),
+      PathButton.Text[0].Style, PathButton.Text[0].Size, teMiddle);
+    PathButton.Text[0].Text := PathText + Suffix;
+    PathButton.Text[0].Alpha := IfThen(Self.Dirs[Index].Missing, 0.6, 1.0);
+  end;
+
+  if (Length(Self.Dirs) > Rows) then
+    Self.Text[Self.TextScroll].Text := Format('%d-%d / %d', [Self.FirstDir + 1, Min(Self.FirstDir + Rows, Length(Self.Dirs)), Length(Self.Dirs)])
+  else
+    Self.Text[Self.TextScroll].Text := '';
+
+  case Self.Focus of
+    sfExit:
+      Self.Interaction := Self.ButtonExit;
+    sfAddStatic:
+      Self.Interaction := Self.ButtonAddStatic;
+    sfAddDynamic:
+      Self.Interaction := Self.ButtonAddDynamic;
+    else
+    begin
+      Row := Self.DirIndex - Self.FirstDir;
+      // built-in folders can only be looked at
+      if (Self.Dirs[Self.DirIndex].Kind = sdkBuiltin) or (Self.Column = scPath) then
+        Self.Interaction := Self.PathButtons[Row]
+      else if (Self.Column = scType) then
+        Self.Interaction := Self.TypeButtons[Row]
+      else
+        Self.Interaction := Self.DeleteButtons[Row];
     end;
   end;
-  // FolderName hover
-  if InRegion(X, Y, Button[Self.FolderName].GetMouseOverArea) and (Self.CurrentFolderSelected <> Self.FolderName) then
+end;
+
+procedure TScreenOptionsSongdirs.ExitScreen();
+begin
+  if Self.Changed then
   begin
-    Self.Button[Self.CurrentFolderSelected].SetSelect(false);   // Deselect last selected folder.
-    Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
+    // keep the changes on the screen unless the user discards them, e.g. a
+    // read-only configuration could not be saved on any later attempt
+    if not UIni.Ini.SaveSongDirs(Self.ConfiguredDirs()) then
+    begin
+      UGraphic.ScreenPopupCheck.ShowPopup(ULanguage.Language.Translate('SING_OPTIONS_SONGDIRS_SAVE_FAILED'),
+        @OnDiscardConfirmed, nil, false);
+      Exit;
+    end;
+    UGraphic.ScreenMain.RequestReloadSongs(not Self.StaticChanged);
+    Self.Changed := false;
   end;
+  Self.FadeTo(@UGraphic.ScreenOptions, UMusic.SoundLib.Back);
 end;
 
 function TScreenOptionsSongdirs.ParseInput(PressedKey: cardinal; CharCode: UCS4Char; PressedDown: boolean): boolean;
 begin
   Result := true;
-  if (PressedDown) then
-  begin // Key Down
-    // check normal keys
-    if (Interaction = Self.FolderName) and (not Self.bMaxDir) and (IsPrintableChar(CharCode)) then //pass printable chars to button
-    begin
-      if (Self.CurrentFolderSelected <> Self.FolderName) then
-        Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
-      if (Length(Self.Button[Self.FolderName].Text[0].Text) < MAX_LENGTH) then
-      begin
-        Self.Button[Self.FolderName].Text[0].Text := Self.Button[Self.FolderName].Text[0].Text + UCS4ToUTF8String(CharCode);
-      end;
-      if (Length(Self.Button[Self.FolderName].Text[0].Text) > 0) then
-      begin
-        Self.Button[Self.FolderName].Text[1].Visible := false;
-      end;
-      Exit;
-    end;
+  if not PressedDown then
+    Exit;
 
-    // check special keys
-    case PressedKey of
-      SDLK_BACKSPACE: // del
-        begin
-          if (Interaction = Self.FolderName) and (not Self.bMaxDir) then
-          begin
-            if (Self.CurrentFolderSelected <> Self.FolderName) then
-              Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
-            Self.Button[Self.FolderName].Text[0].DeleteLastLetter();
-            if (Length(Self.Button[Self.FolderName].Text[0].Text) = 0) then
-            begin
-              Self.Button[Self.FolderName].Text[1].Visible := true;
-            end;
-          end
+  case PressedKey of
+    SDLK_ESCAPE, SDLK_BACKSPACE:
+      Self.ExitScreen();
+    SDLK_RETURN:
+      Self.Activate();
+    SDLK_DELETE:
+      if (Self.Focus = sfList) and (Self.Dirs[Self.DirIndex].Kind <> sdkBuiltin) then
+        Self.ConfirmDelete(Self.DirIndex);
+    SDLK_UP:
+      case Self.Focus of
+        sfList:
+          if (Self.DirIndex > 0) then
+            Self.SelectDir(Self.DirIndex - 1)
           else
-            Self.ParseInput(SDLK_ESCAPE, CharCode, PressedDown);
-        end;
-
-      SDLK_ESCAPE:
-        begin
-          Self.ExitSongdirs();
-        end;
-
-      SDLK_RETURN:
-        begin
-          // Show folder delete button
-          if (Self.CurrentFolderSelected <> Self.FolderName) then
-            Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
-          // Hide folder name message
-          if (Interaction = Self.FolderName) then
-            Self.Button[Self.FolderName].Text[1].Visible := false;
-          // Add Folder to list
-          if (Interaction = Self.AddFolderButton) or
-             (Interaction = Self.FolderName) then
-          begin 
-            Self.fDirname := Path(Self.Button[Self.FolderName].Text[0].Text);
-            if (LengthUTF8(Self.fDirname.ToUTF8()) > 0) and not Self.bMaxDir then
-            begin
-              Self.bChange := true;
-              Self.fDirname := Self.fDirname.GetAbsolutePath();
-              if not Self.fDirname.IsDirectory() then
-                ScreenPopupCheck.ShowPopup('SING_OPTIONS_SONGDIRS_NOTEXIST_FOLDER', @OnFolderNotExist, nil, false)
-              else
-              begin
-                Self.AddFolder(false);
-                //Clean folder name entry text
-                Self.Button[Self.FolderName].Text[0].Text := '';
-                Self.Button[Self.FolderName].Text[1].Visible := true;
-                Self.Button[Self.DirButton[1] + 1].SetSelect(true);
-              end;
-            end;
-          end
-          else // Click on delete song folder button
-          if (Interaction > Self.ExitButton) and ((Interaction mod 3) = 2) then
+            Self.SetFocus(sfExit);
+        sfAddStatic, sfAddDynamic:
+          if (Length(Self.Dirs) > 0) then
+            Self.SelectDir(High(Self.Dirs))
+          else
+            Self.SetFocus(sfExit);
+      end;
+    SDLK_DOWN:
+      case Self.Focus of
+        sfExit:
+          Self.SetFocus(sfList);
+        sfList:
+          if (Self.DirIndex < High(Self.Dirs)) then
+            Self.SelectDir(Self.DirIndex + 1)
+          else
+            Self.SetFocus(sfAddStatic);
+      end;
+    SDLK_LEFT:
+      case Self.Focus of
+        sfList:
+          if (Self.Column > scType) then
           begin
-            // Delete selected Folder from list
-            Self.bChange := true;
-            Self.DelFolder();
-          end
-          else // Copy song folder name
-          if (Interaction > Self.ExitButton) and (not Self.bMaxDir) and ((Interaction mod 3) = 0) then
-          begin
-            Self.Button[Self.DefaultSongdir + 1].Selectable := true;
-            Self.Button[Self.FolderName].Text[0].Text := Self.Button[Interaction + 1].Text[0].Text;
-            Self.Button[Self.FolderName].Text[1].Visible := false;
-            Self.Button[Self.DefaultSongdir + 1].Selectable := false;
-          end
-          else if SelInteraction = Self.ExitButton then
-          begin
-              Self.ExitSongdirs();
+            Self.Column := Pred(Self.Column);
+            Self.UpdateList();
           end;
-        end;
-      SDLK_LEFT:
-      begin
-          InteractPrev;
+        sfAddDynamic:
+          Self.SetFocus(sfAddStatic);
       end;
-      SDLK_RIGHT:
-      begin
-          InteractNext;
+    SDLK_RIGHT:
+      case Self.Focus of
+        sfList:
+          if (Self.Column < scDelete) then
+          begin
+            Self.Column := Succ(Self.Column);
+            Self.UpdateList();
+          end;
+        sfAddStatic:
+          Self.SetFocus(sfAddDynamic);
       end;
-      SDLK_UP:
-      begin
-          InteractPrev;
-      end;
-      SDLK_DOWN:
-      begin
-          InteractNext;
-      end;
-    end;
+    SDLK_PAGEUP:
+      if (Self.Focus = sfList) then
+        Self.SelectDir(Self.DirIndex - Length(Self.PathButtons));
+    SDLK_PAGEDOWN:
+      if (Self.Focus = sfList) then
+        Self.SelectDir(Self.DirIndex + Length(Self.PathButtons));
+    SDLK_HOME:
+      Self.SelectDir(0);
+    SDLK_END:
+      Self.SelectDir(High(Self.Dirs));
   end;
 end;
 
-constructor TScreenOptionsSongdirs.Create;
-begin
-  inherited Create;
-
-  Self.LoadFromTheme(UThemes.Theme.OptionsSongdirs);
-
-  Self.FolderName := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonFolderName);
-  Self.Button[Self.FolderName].Text[0].Writable := true;
-  Self.AddFolderButton := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonAdd);
-  Self.ExitButton := Self.AddButton(UThemes.Theme.OptionsSongdirs.ButtonExit);
-
-  Self.DirButton[1] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton1);
-  Self.DefaultSongdir := Self.DirButton[1] + 1;
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton1);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton1);
-  Self.AddButtonText(Self.Button[Self.DirButton[1] + 1],10,5,255,255,255,0,20,0,'');
-  Self.DirButton[2] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton2);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton2);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton2);
-  Self.AddButtonText(Self.Button[Self.DirButton[2] + 1],10,5,255,255,255,0,20,0,'');
-  Self.DirButton[3] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton3);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton3);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton3);
-  Self.AddButtonText(Self.Button[Self.DirButton[3] + 1],10,5,255,255,255,0,20,0,'');
-  Self.DirButton[4] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton4);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton4);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton4);
-  Self.AddButtonText(Self.Button[Self.DirButton[4] + 1],10,5,255,255,255,0,20,0,'');
-  Self.DirButton[5] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton5);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton5);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton5);
-  Self.AddButtonText(Self.Button[Self.DirButton[5] + 1],10,5,255,255,255,0,20,0,'');
-  Self.DirButton[6] := Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderButton6);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.FolderNameButton6);
-  Self.AddButton(UThemes.Theme.OptionsSongdirs.DelFolderButton6);
-  Self.AddButtonText(Self.Button[Self.DirButton[6] + 1],10,5,255,255,255,0,20,0,'');
-
-  Self.Interaction := 0;
-end;
-
-procedure TScreenOptionsSongdirs.OnShow;
+function TScreenOptionsSongdirs.ParseMouse(MouseButton: integer; BtnDown: boolean; X, Y: integer): boolean;
 var
-  I: integer;
-begin
-  inherited;
+  Row: integer;
+  Clicked: boolean;
 
-  Self.bMaxDir := false;
-  Self.bChange := false;
-  Self.fDirname := PATH_NONE();
-  Self.Interaction := 0;
-
-  //Hide folder buttons
-  for I := 1 to MAX_DIR do
+  // selects the element under the mouse and runs its action on a click
+  function Hit(ButtonIndex: integer; NewFocus: TSongDirsFocus; NewColumn: TSongDirColumn): boolean;
   begin
-    Self.Button[Self.DirButton[I]].Visible := false;
-    Self.Button[Self.DirButton[I] + 1].Visible := false;
-    Self.Button[Self.DirButton[I] + 2].Visible := false;
-  end;
-
-  Self.LoadFolders(true);
-
-  Self.Button[Self.DefaultSongdir].Selectable := false;
-  Self.Button[Self.FolderName].Visible := true;
-  Self.Button[Self.FolderName].Text[0].Text := '';
-  Self.Button[Self.FolderName].Text[1].Visible := true;
-  Self.Button[Self.AddFolderButton].Selectable := true;
-end;
-
-procedure TScreenOptionsSongdirs.AddFolder(bCreateDir: boolean);
-var
-  I: integer;
-begin
-  Self.SongPathList.Add(Self.fDirname);
-  Self.MakeSongPathList[Self.NumFolders] := bCreateDir;
-  Inc(Self.NumFolders);
-  I := Self.DirButton[Self.NumFolders];
-  Self.Button[I + 1].Text[0].Text := Self.fDirname.ToUTF8();
-  Self.Button[I + 1].Visible := true;
-  Self.Button[I].Visible := true;
-
-  //Block entry button when max folder
-  if (Self.NumFolders  = MAX_DIR) then
-  begin
-    Self.bMaxDir := true;
-    Self.Button[Self.AddFolderButton].Selectable := false;
-    Self.Button[Self.FolderName].Text[0].Writable := false;
-  end;
-end;
-
-procedure TScreenOptionsSongdirs.DelFolder;
-var
-  I: integer;
-begin
-  for I := 0 to Self.SongPathList.Count - 1 do
-  begin
-    Self.fDirname := Self.SongPathList[I] as IPath;
-    if (Self.fDirname.ToUTF8() = Self.Button[Self.CurrentFolderSelected].Text[0].Text) then
+    Result := Self.Button[ButtonIndex].Visible and InRegion(X, Y, Self.Button[ButtonIndex].GetMouseOverArea());
+    if not Result then
+      Exit;
+    if (NewFocus = sfList) then
     begin
-      Self.Button[Self.CurrentFolderSelected + 1].Visible := false;
-      Self.Button[Self.CurrentFolderSelected].Text[0].Text := '';
-      Self.ShiftFolders(Self.CurrentFolderSelected);
-      Self.CurrentFolderSelected := Self.CurrentFolderSelected - 3;
-      Self.SongPathList.Delete(I);
-      Self.MakeSongPathList[I] := false;
-      Dec(Self.NumFolders);
-      Break;
+      Self.DirIndex := Self.FirstDir + Row;
+      Self.Column := NewColumn;
     end;
+    Self.SetFocus(NewFocus);
+    if Clicked then
+      Self.Activate();
   end;
-  if (Self.NumFolders < MAX_DIR) then
-  begin
-    Self.bMaxDir := false;
-    Self.Button[Self.AddFolderButton].Selectable := true;
-    Self.Button[Self.FolderName].Text[0].Writable := true;
-  end;
-end;
 
-procedure TScreenOptionsSongdirs.SaveFolders;
-var
-  I: integer;
-  CurrentPath: IPath;
-  bMakeDir: boolean;
 begin
-    UPathUtils.InitializeSongPaths();
-  for I := 0 to Self.SongPathList.Count - 1 do
+  Result := true;
+  if BtnDown and (MouseButton = SDL_BUTTON_RIGHT) then
   begin
-    CurrentPath := Self.SongPathList[I] as IPath;
-    bMakeDir := Self.MakeSongPathList[I];
-    UPathUtils.AddSongPath(CurrentPath, bMakeDir);
+    Result := Self.ParseInput(SDLK_ESCAPE, 0, true);
+    Exit;
   end;
 
-  //Save changes.
-  UIni.Ini.SaveSongdirs();
+  if BtnDown and ((MouseButton = SDL_BUTTON_WHEELDOWN) or (MouseButton = SDL_BUTTON_WHEELUP)) then
+  begin
+    if (Self.Focus = sfList) then
+      Self.SelectDir(Self.DirIndex + IfThen(MouseButton = SDL_BUTTON_WHEELDOWN, 1, -1));
+    Exit;
+  end;
+
+  Self.TransferMouseCords(X, Y);
+  Clicked := BtnDown and (MouseButton = SDL_BUTTON_LEFT);
+  Row := 0;
+  if Hit(Self.ButtonExit, sfExit, scPath) or Hit(Self.ButtonAddStatic, sfAddStatic, scPath) or
+     Hit(Self.ButtonAddDynamic, sfAddDynamic, scPath) then
+    Exit;
+
+  for Row := 0 to High(Self.PathButtons) do
+    if Hit(Self.TypeButtons[Row], sfList, scType) or Hit(Self.PathButtons[Row], sfList, scPath) or
+       Hit(Self.DeleteButtons[Row], sfList, scDelete) then
+      Exit;
 end;
 
-procedure TScreenOptionsSongdirs.ShiftFolders(Current: integer);
-var
-  I: integer;
-begin
-  for I := ((Current - 1) Div 3) to (Self.NumFolders - 1) do
-    Self.Button[Self.DirButton[I] + 1].Text[0].Text := Self.Button[Self.DirButton[I + 1] + 1].Text[0].Text;
-
-  Self.Button[Current + 1].Visible := false;
-  //Clean and hide last folder button
-  I := Self.DirButton[Self.NumFolders];
-  Self.Button[I].Visible := false;
-  Self.Button[I + 1].Visible := false;
-  Self.Button[I + 1].Text[0].Text := '';
-  Self.Button[I + 2].Visible := false;
-end;
-
-procedure TScreenOptionsSongdirs.ExitSongdirs;
-begin
-  if Self.bChange then
-  begin
-    Self.SaveFolders();
-    //Refresh Songs
-    UGraphic.ScreenMain.ReloadSongs(false);
-  end;
-  Self.FadeTo(@UGraphic.ScreenOptions, UMusic.SoundLib.Back);
-end;
-
-procedure TScreenOptionsSongdirs.LoadFolders(CreateButtons: boolean);
-var
-  I,J: integer;
-  CurrentPath: IPath;
-begin
-  // Folder list
-  Self.NumFolders := 0;
-  Self.SongPathList := TInterfaceList.Create();
-  for I := 0 to UPathUtils.SongPaths.Count - 1 do
-  begin
-    If (I < MAX_DIR) then   // Max. Folder
-    begin
-      CurrentPath := UPathUtils.SongPaths[I] as IPath;
-      Self.SongPathList.Add(CurrentPath);
-    end;
-  end;
-  for I := 0 to Self.SongPathList.Count - 1 do
-  begin
-    CurrentPath := Self.SongPathList[I] as IPath;
-    if CreateButtons then
-    begin
-      J := Self.DirButton[I + 1];
-      Self.Button[J].Visible := true;
-      Self.Button[J + 1].Visible := true;
-      Self.Button[J + 1].Text[0].Text := CurrentPath.GetPath().ToUTF8();
-      Inc(Self.NumFolders);
-    end
-    else  // Text refresh
-      Self.Button[Self.DirButton[I + 1] + 1].Text[0].Text := CurrentPath.GetPath().ToUTF8();
-  end;
-  //Block entry button when max folder
-  if (Self.NumFolders = MAX_DIR) then
-  begin
-    Self.bMaxDir := true;
-    Self.Button[Self.AddFolderButton].Selectable := false;
-    Self.Button[Self.FolderName].Text[0].Writable := false;
-  end
-  else
-  begin
-    Self.bMaxDir := false;
-    Self.Button[Self.AddFolderButton].Selectable := true;
-    Self.Button[Self.FolderName].Text[0].Writable := true;
-  end;
-end;
 end.

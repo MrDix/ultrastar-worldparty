@@ -40,6 +40,7 @@ var
   GamePath:         IPath;
   SoundPath:        IPath;
   SongPaths:        IInterfaceList;
+  BuiltinSongPaths: IInterfaceList; // song paths scanned regardless of the configuration
   DynamicSongPaths: IInterfaceList;
   DisabledSongPath: IPath; // trash folder for disabled songs (PATH_NONE if unset)
   LogPath:          IPath;
@@ -67,6 +68,7 @@ procedure AddSongPath(const Path: IPath); overload;
 procedure AddSongPath(const Path: IPath; const bMakeDir: boolean); overload;
 procedure AddDynamicSongPath(const Path: IPath);
 function IsDynamicSongPath(const Path: IPath): boolean;
+function PathsOverlap(const PathA, PathB: IPath): boolean;
 procedure SetDisabledSongPath(const Path: IPath);
 function GetConfigFileName(): IPath;
 function GetDatabaseFileName(): IPath;
@@ -146,6 +148,38 @@ begin
   end;
 end;
 
+// checks whether both paths point to the same directory or one of them lies
+// inside the other one
+function PathsOverlap(const PathA, PathB: IPath): boolean;
+var
+  AbsA, AbsB: IPath;
+begin
+  Result := false;
+  if PathA.IsUnset() or PathB.IsUnset() then
+    Exit;
+
+  AbsA := PathA.GetAbsolutePath().AppendPathDelim();
+  AbsB := PathB.GetAbsolutePath().AppendPathDelim();
+  Result := AbsA.Equals(AbsB) or AbsA.IsChildOf(AbsB, false) or AbsB.IsChildOf(AbsA, false);
+end;
+
+// checks whether the given path overlaps one of the paths of the given list
+function IsPathOverlappingList(const Path: IPath; const List: IInterfaceList): boolean;
+var
+  Index: integer;
+begin
+  Result := false;
+  if (List = nil) then
+    Exit;
+
+  for Index := 0 to List.Count - 1 do
+    if PathsOverlap(Path, List[Index] as IPath) then
+    begin
+      Result := true;
+      Exit;
+    end;
+end;
+
 procedure AddSongPath(const Path: IPath);
 begin
   AddSongPath(Path, true);
@@ -153,7 +187,8 @@ end;
 
 procedure AddSongPath(const Path: IPath; const bMakeDir: boolean);
 begin
-  if IsPathWithinList(Path, DynamicSongPaths) then
+  // songs of a directory in both lists would be loaded twice
+  if IsPathOverlappingList(Path, DynamicSongPaths) then
   begin
     Log.LogWarn('Ignoring song path overlapping a dynamic song path: ' + Path.ToNative, 'AddSongPath');
     Exit;
@@ -163,7 +198,7 @@ end;
 
 procedure AddDynamicSongPath(const Path: IPath);
 begin
-  if IsPathWithinList(Path, SongPaths) then
+  if IsPathOverlappingList(Path, SongPaths) then
   begin
     Log.LogWarn('Ignoring dynamic song path overlapping an existing song path: ' + Path.ToNative, 'AddDynamicSongPath');
     Exit;
@@ -285,6 +320,8 @@ begin
 end;
 
 procedure InitializeSongPaths();
+var
+  Index: integer;
 begin
   SongPaths := TInterfaceList.Create();
   DynamicSongPaths := TInterfaceList.Create();
@@ -296,6 +333,11 @@ begin
   {$ELSE}
     AddSongPath(UPlatform.Platform().GetGameSharedPath().Append('songs'));
   {$IFEND}
+
+  // remember the paths added so far, they are not part of the configuration
+  BuiltinSongPaths := TInterfaceList.Create();
+  for Index := 0 to SongPaths.Count - 1 do
+    BuiltinSongPaths.Add(SongPaths[Index]);
 end;
 
 end.

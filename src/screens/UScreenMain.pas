@@ -50,10 +50,12 @@ type
       function Draw: boolean; override;
       procedure OnShow; override;
       procedure ReloadSongs(ScreenReturn: boolean = true; DynamicOnly: boolean = false);
+      procedure RequestReloadSongs(DynamicOnly: boolean);
       procedure SetInteraction(Num: integer); override;
       procedure SetAnimationProgress(Progress: real); override;
     private
       ReturnToSongScreenAfterLoadSongs: boolean;
+      PendingReload, PendingReloadDynamicOnly: boolean; //reload requested while a scan was still running
       TextDescription, TextDescriptionLong, TextProgressSongs: integer;
       function CheckSongs(): boolean;
   end;
@@ -198,6 +200,8 @@ begin
 
   Interaction := 0;
   Self.ReturnToSongScreenAfterLoadSongs := false;
+  Self.PendingReload := false;
+  Self.PendingReloadDynamicOnly := false;
 end;
 
 function TScreenMain.Draw: boolean;
@@ -207,6 +211,14 @@ begin
   inherited Draw;
   Result := true;
   ProgressSong := USongs.Songs.GetLoadProgress();
+  if ProgressSong.Finished and Self.PendingReload then //start the reload requested during the last scan
+  begin
+    Self.PendingReload := false;
+    Self.ReloadSongs(false, Self.PendingReloadDynamicOnly);
+    Self.Text[Self.TextProgressSongs].Visible := true;
+    Self.Text[Self.TextDescriptionLong].Visible := false;
+    ProgressSong := USongs.Songs.GetLoadProgress();
+  end;
   if not ProgressSong.Finished then //while song loading show progress
     Self.Text[Self.TextProgressSongs].Text := ProgressSong.Folder+': '+IntToStr(ProgressSong.Total)+'\n\n'+ProgressSong.FolderProcessed
   else if not Self.Text[Self.TextDescriptionLong].Visible then //after finish song loading, return to normal mode and close popup
@@ -275,6 +287,8 @@ begin
   if USongs.Songs.GetLoadProgress().Finished then
   begin
     UIni.Ini.Load();
+    //the song thread may still preload covers of the songs freed below
+    USongs.Songs.StopCoverPreload();
     //keep the parsed songs of the static directories on a dynamic-only
     //rescan and free every discarded song instance
     KeepList := nil;
@@ -296,6 +310,19 @@ begin
   end
   else
     UGraphic.ScreenPopupError.ShowPopup(ULanguage.Language.Translate('ERROR_LOADING_SONGS'))
+end;
+
+{ Reloads the songs now or, while a scan is still running, as soon as it has finished }
+procedure TScreenMain.RequestReloadSongs(DynamicOnly: boolean);
+begin
+  if USongs.Songs.GetLoadProgress().Finished then
+    Self.ReloadSongs(false, DynamicOnly)
+  else
+  begin
+    //a full rescan includes the dynamic directories
+    Self.PendingReloadDynamicOnly := DynamicOnly and ((not Self.PendingReload) or Self.PendingReloadDynamicOnly);
+    Self.PendingReload := true;
+  end;
 end;
 
 end.

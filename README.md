@@ -40,9 +40,8 @@ DynamicSongDir1=D:\Karaoke\Incoming
 DisabledSongDir=D:\Karaoke\Trash
 ```
 
-* `SongDir1`..`SongDirN` — static song libraries. They are scanned once
-  at startup. Any number of entries can be added, also from the in-game
-  options (last entry "Folders").
+* `SongDir1`..`SongDirN` — static song libraries ("standard" folders).
+  They are scanned once at startup. Any number of entries can be added.
 * `DynamicSongDir1`..`DynamicSongDirN` — directories whose content
   changes at runtime, for example a folder that other tools drop new
   songs into while the game is running.
@@ -51,6 +50,28 @@ DisabledSongDir=D:\Karaoke\Trash
   song disappears from the library without deleting any files. Move it
   back manually to re-enable it. The folder must be on the same drive
   as the song directories and must not lie inside one of them.
+
+### Managing song folders in the game
+
+**Options → Song folders** lists all song folders, including the
+built-in ones that are always scanned (such as `songs` next to the
+configuration):
+
+* **Add standard folder** / **Add dynamic folder** open a folder browser
+  that works with keyboard, mouse and controller. It lists the drives
+  and subfolders; **Ctrl+V** pastes a path, which also allows network
+  shares like `\\server\share`.
+* **Enter** on the type of a folder switches between standard and
+  dynamic, **Enter** on the path picks another folder, and the delete
+  button (or the **Del** key) removes the folder from the list. The songs
+  on disk are never touched.
+* Folders that contain each other, or the trash folder, are rejected,
+  because their songs would be loaded twice.
+
+Leaving the screen saves the changes to `config.ini` and rescans the
+songs: only the dynamic folders when nothing else changed, otherwise
+everything. If a scan is still running, the rescan follows automatically
+once it has finished and the main menu is shown.
 
 ### Rescanning at runtime
 
