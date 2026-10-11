@@ -68,6 +68,9 @@ const
 type
   TLog = class
   private
+    // the song threads log concurrently to the main thread, this serializes
+    // the access to the files and the console buffer
+    LogLock:             TRTLCriticalSection;
     LogFile:             TextFile;
     LogFileOpened:       boolean;
     BenchmarkFile:       TextFile;
@@ -168,6 +171,7 @@ end;
 
 constructor TLog.Create;
 begin
+  System.InitCriticalSection(Self.LogLock);
   ConsoleBuffer := TStringList.Create;
   inherited;
   LogLevel := LOG_LEVEL_DEFAULT;
@@ -185,6 +189,7 @@ begin
     CloseFile(LogFile);
 
   ConsoleBuffer.Free;
+  System.DoneCriticalSection(Self.LogLock);
   inherited;
 end;
 
@@ -213,77 +218,81 @@ var
 begin
   if (FileOutputEnabled and Params.Benchmark) then
   begin
-    if not BenchmarkFileOpened then
-    begin
-      BenchmarkFileOpened := true;
-      AssignFile(BenchmarkFile, LogPath.Append('Benchmark.log').ToNative);
-      {$I-}
-      Rewrite(BenchmarkFile);
-      if IOResult = 0 then
-        BenchmarkFileOpened := true;
-      {$I+}
-
-      //If File is opened write Date to Benchmark File
-      If (BenchmarkFileOpened) then
+    System.EnterCriticalSection(Self.LogLock);
+    try
+      if not BenchmarkFileOpened then
       begin
-        WriteLn(BenchmarkFile, Title + ' Benchmark File');
-        WriteLn(BenchmarkFile, 'Date: ' + DatetoStr(Now) + ' Time: ' + TimetoStr(Now));
-        WriteLn(BenchmarkFile, '-------------------');
+        AssignFile(BenchmarkFile, LogPath.Append('Benchmark.log').ToNative);
+        {$I-}
+        Rewrite(BenchmarkFile);
+        if IOResult = 0 then
+          BenchmarkFileOpened := true;
+        {$I+}
 
+        //If File is opened write Date to Benchmark File
+        If (BenchmarkFileOpened) then
+        begin
+          WriteLn(BenchmarkFile, Title + ' Benchmark File');
+          WriteLn(BenchmarkFile, 'Date: ' + DatetoStr(Now) + ' Time: ' + TimetoStr(Now));
+          WriteLn(BenchmarkFile, '-------------------');
+
+          Flush(BenchmarkFile);
+        end;
+      end;
+
+      if BenchmarkFileOpened then
+      begin
+        BenchmarkEnd(Number);
+        Time := BenchmarkTimeLength[Number];
+        BenchmarkStart(Number);
+        Miliseconds := Trunc(Frac(Time) * 1000);
+        Seconds := Trunc(Time) mod 60;
+        Minutes := Trunc((Time - Seconds) / 60);
+        ValueText := '';
+        //ValueText := FloatToStr(BenchmarkTimeLength[Number]);
+
+        {
+        ValueText := FloatToStr(SecondOf(BenchmarkTimeLength[Number]) +
+                                MilliSecondOf(BenchmarkTimeLength[Number])/1000);
+        if MinuteOf(BenchmarkTimeLength[Number]) >= 1 then
+          ValueText := IntToStr(MinuteOf(BenchmarkTimeLength[Number])) + ':' + ValueText;
+        WriteLn(FileBenchmark, Text + ': ' + ValueText + ' seconds');
+        }
+
+        if (Minutes = 0) and (Seconds = 0) then begin
+          MilisecondsS := IntToStr(Miliseconds);
+          ValueText := MilisecondsS + ' miliseconds';
+        end;
+
+        if (Minutes = 0) and (Seconds >= 1) then begin
+          MilisecondsS := IntToStr(Miliseconds);
+          while Length(MilisecondsS) < 3 do
+            MilisecondsS := '0' + MilisecondsS;
+
+          SecondsS := IntToStr(Seconds);
+
+          ValueText := SecondsS + ',' + MilisecondsS + ' seconds';
+        end;
+
+        if Minutes >= 1 then begin
+          MilisecondsS := IntToStr(Miliseconds);
+          while Length(MilisecondsS) < 3 do
+            MilisecondsS := '0' + MilisecondsS;
+
+          SecondsS := IntToStr(Seconds);
+          while Length(SecondsS) < 2 do
+            SecondsS := '0' + SecondsS;
+
+          MinutesS := IntToStr(Minutes);
+
+          ValueText := MinutesS + ':' + SecondsS + ',' + MilisecondsS + ' minutes';
+        end;
+
+        WriteLn(BenchmarkFile, Text + ': ' + ValueText);
         Flush(BenchmarkFile);
       end;
-    end;
-
-    if BenchmarkFileOpened then
-    begin
-      BenchmarkEnd(Number);
-      Time := BenchmarkTimeLength[Number];
-      BenchmarkStart(Number);
-      Miliseconds := Trunc(Frac(Time) * 1000);
-      Seconds := Trunc(Time) mod 60;
-      Minutes := Trunc((Time - Seconds) / 60);
-      ValueText := '';
-      //ValueText := FloatToStr(BenchmarkTimeLength[Number]);
-
-      {
-      ValueText := FloatToStr(SecondOf(BenchmarkTimeLength[Number]) +
-                              MilliSecondOf(BenchmarkTimeLength[Number])/1000);
-      if MinuteOf(BenchmarkTimeLength[Number]) >= 1 then
-        ValueText := IntToStr(MinuteOf(BenchmarkTimeLength[Number])) + ':' + ValueText;
-      WriteLn(FileBenchmark, Text + ': ' + ValueText + ' seconds');
-      }
-
-      if (Minutes = 0) and (Seconds = 0) then begin
-        MilisecondsS := IntToStr(Miliseconds);
-        ValueText := MilisecondsS + ' miliseconds';
-      end;
-
-      if (Minutes = 0) and (Seconds >= 1) then begin
-        MilisecondsS := IntToStr(Miliseconds);
-        while Length(MilisecondsS) < 3 do
-          MilisecondsS := '0' + MilisecondsS;
-
-        SecondsS := IntToStr(Seconds);
-
-        ValueText := SecondsS + ',' + MilisecondsS + ' seconds';
-      end;
-
-      if Minutes >= 1 then begin
-        MilisecondsS := IntToStr(Miliseconds);
-        while Length(MilisecondsS) < 3 do
-          MilisecondsS := '0' + MilisecondsS;
-
-        SecondsS := IntToStr(Seconds);
-        while Length(SecondsS) < 2 do
-          SecondsS := '0' + SecondsS;
-
-        MinutesS := IntToStr(Minutes);
-
-        ValueText := MinutesS + ':' + SecondsS + ',' + MilisecondsS + ' minutes';
-      end;
-
-      WriteLn(BenchmarkFile, Text + ': ' + ValueText);
-      Flush(BenchmarkFile);
+    finally
+      System.LeaveCriticalSection(Self.LogLock);
     end;
   end;
 end;
@@ -361,18 +370,25 @@ begin
       LogMsg := 'DEBUG:  ' + Text;
 
     LogMsg := '['+DatetoStr(now)+' '+TimetoStr(now)+'] '+LogMsg;
-    // output log-message
-    if (Level <= LogLevel) then
-    begin
-      DebugWriteLn(LogMsg);
-      LogConsole(LogMsg);
+    System.EnterCriticalSection(Self.LogLock);
+    try
+      // output log-message
+      if (Level <= LogLevel) then
+        LogConsole(LogMsg);
+
+      // write message to log-file
+      if (Level <= LogFileLevel) then
+      begin
+        LogToFile(LogMsg);
+      end;
+    finally
+      System.LeaveCriticalSection(Self.LogLock);
     end;
 
-    // write message to log-file
-    if (Level <= LogFileLevel) then
-    begin
-      LogToFile(LogMsg);
-    end;
+    // outside of the lock: the console thread holds its own lock while it
+    // adds the text to the console buffer
+    if (Level <= LogLevel) then
+      DebugWriteLn(LogMsg);
   end;
 
   // exit application on criticial errors (cannot be turned off)
@@ -545,24 +561,51 @@ end;
 
 procedure TLog.ClearConsoleLog;
 begin
-  ConsoleBuffer.Clear;
+  System.EnterCriticalSection(Self.LogLock);
+  try
+    ConsoleBuffer.Clear;
+  finally
+    System.LeaveCriticalSection(Self.LogLock);
+  end;
 end;
 
 function TLog.GetConsole(const index: integer; FromTheBeginning: boolean = false): string;
+var
+  I: integer;
 begin
-  if FromTheBeginning then Result := ConsoleBuffer[index]
-  else Result := ConsoleBuffer[ConsoleBuffer.Count-1-index];
+  Result := '';
+  System.EnterCriticalSection(Self.LogLock);
+  try
+    if FromTheBeginning then I := index
+    else I := ConsoleBuffer.Count-1-index;
+    // another thread may have changed the buffer since the caller read its count
+    if (I >= 0) and (I < ConsoleBuffer.Count) then
+      Result := ConsoleBuffer[I];
+  finally
+    System.LeaveCriticalSection(Self.LogLock);
+  end;
 end;
 
 function TLog.GetConsoleCount: integer;
 begin
-  Result := ConsoleBuffer.Count;
+  System.EnterCriticalSection(Self.LogLock);
+  try
+    Result := ConsoleBuffer.Count;
+  finally
+    System.LeaveCriticalSection(Self.LogLock);
+  end;
 end;
 
 procedure TLog.LogConsole(const Text: string);
 begin
-  ConsoleBuffer.Insert(0, Text);
-  if ConsoleBuffer.Count > CONSOLE_SCROLLBACK_SIZE then ConsoleBuffer.Capacity:=CONSOLE_SCROLLBACK_SIZE;
+  // also called by the console thread, the lock is reentrant for LogMsg
+  System.EnterCriticalSection(Self.LogLock);
+  try
+    ConsoleBuffer.Insert(0, Text);
+    if ConsoleBuffer.Count > CONSOLE_SCROLLBACK_SIZE then ConsoleBuffer.Capacity:=CONSOLE_SCROLLBACK_SIZE;
+  finally
+    System.LeaveCriticalSection(Self.LogLock);
+  end;
 end;
 
 end.
