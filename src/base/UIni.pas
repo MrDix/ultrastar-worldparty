@@ -228,6 +228,10 @@ type
       SingTimebarMode:    integer;
       FindUnsetMedley:    integer;
 
+      // Developer
+      DeveloperMode:      integer; // only set in the config file, unlocks developer options
+      VocalsInput:        integer; // analyze the vocals track of a song instead of the microphones
+
       // WebCam
       WebCamID:         integer;
       WebcamResolution: integer;
@@ -1053,6 +1057,10 @@ begin
     // Debug
   Debug := ReadArrayIndex(IDebug, IniFile, 'Advanced', 'Debug', 0);
 
+  // Developer
+  Self.DeveloperMode := ReadArrayIndex(Switch, IniFile, 'Developer', 'DeveloperMode', 0);
+  Self.VocalsInput := ReadArrayIndex(Switch, IniFile, 'Developer', 'VocalsInput', 0);
+
     // Oscilloscope
   Oscilloscope := ReadArrayIndex(IOscilloscope, IniFile, 'Advanced', 'Oscilloscope', 0);
 
@@ -1254,6 +1262,10 @@ begin
 
   // Debug
   IniFile.WriteString('Advanced', 'Debug', IDebug[Debug]);
+
+  // Developer
+  IniFile.WriteString('Developer', 'DeveloperMode', Switch[Self.DeveloperMode]);
+  IniFile.WriteString('Developer', 'VocalsInput', Switch[Self.VocalsInput]);
 
   // Oscilloscope
   IniFile.WriteString('Advanced', 'Oscilloscope', IOscilloscope[Oscilloscope]);

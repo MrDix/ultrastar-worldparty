@@ -915,6 +915,7 @@ type
     SelectSlideChannel:    TThemeSelectSlide;
     SelectThreshold:       TThemeSelectSlide;
     SelectMicBoost:        TThemeSelectSlide;
+    SelectVocalsInput:     TThemeSelectSlide;
     ButtonExit:            TThemeButton;
 
     SoundCardDesc:         TThemeText;
@@ -922,6 +923,7 @@ type
     ChannelDesc:           TThemeText;
     ThresholdDesc:         TThemeText;
     MicBoostDesc:          TThemeText;
+    VocalsInputDesc:       TThemeText;
   end;
 
   TThemeOptionsAdvanced = class(TThemeBasic)
@@ -2241,6 +2243,7 @@ begin
       ThemeLoadSelectSlide(OptionsMicrophones.SelectSlideChannel,  'OptionsMicrophonesSelectSlideChannel');
       ThemeLoadSelectSlide(OptionsMicrophones.SelectThreshold,     'OptionsMicrophonesSelectThreshold');
       ThemeLoadSelectSlide(OptionsMicrophones.SelectMicBoost,      'OptionsMicrophonesSelectMicBoost');
+      ThemeLoadSelectSlide(OptionsMicrophones.SelectVocalsInput,   'OptionsMicrophonesSelectVocalsInput');
       ThemeLoadButton(OptionsMicrophones.ButtonExit,               'OptionsMicrophonesButtonExit');
 
       ThemeLoadText(OptionsMicrophones.SoundCardDesc,              'OptionsMicrophonesSoundCardDesc');
@@ -2248,6 +2251,7 @@ begin
       ThemeLoadText(OptionsMicrophones.ChannelDesc,                'OptionsMicrophonesChannelDesc');
       ThemeLoadText(OptionsMicrophones.ThresholdDesc,              'OptionsMicrophonesThresholdDesc');
       ThemeLoadText(OptionsMicrophones.MicBoostDesc,               'OptionsMicrophonesMicBoostDesc');
+      ThemeLoadText(OptionsMicrophones.VocalsInputDesc,            'OptionsMicrophonesVocalsInputDesc');
 
       //Options Advanced
       ThemeLoadBasic(OptionsAdvanced, 'OptionsAdvanced');

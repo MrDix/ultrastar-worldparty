@@ -213,6 +213,8 @@ var
   ChannelTheme: ^TThemeSelectSlide;
   //ButtonTheme: TThemeButton;
   WidgetYPos: integer;
+  VocalsTheme: TThemeSelectSlide;
+  VocalsDescTheme: TThemeText;
 begin
   inherited Create;
 
@@ -313,13 +315,27 @@ begin
 
   end;
 
+  // developer mode: analyze the vocals track of a song instead of the microphones
+  if (Ini.DeveloperMode = 1) then
+  begin
+    VocalsTheme := Theme.OptionsMicrophones.SelectVocalsInput;
+    VocalsDescTheme := Theme.OptionsMicrophones.VocalsInputDesc;
+    // move it below the channels of devices with many channels, but keep it
+    // on the screen
+    if (WidgetYPos > VocalsTheme.Y) then
+    begin
+      WidgetYPos := Min(WidgetYPos, 600 - VocalsTheme.H);
+      VocalsDescTheme.Y := VocalsDescTheme.Y + WidgetYPos - VocalsTheme.Y;
+      VocalsTheme.Y := WidgetYPos;
+    end;
+    AddSelectSlide(VocalsTheme, Ini.VocalsInput, UIni.Switch, 'OPTION_VALUE_');
+    Self.AddText(VocalsDescTheme);
+  end;
+
+  // store InteractionID
+  ExitButtonIID := Length(Interactions);
   // add Exit-button
   AddButton(Theme.OptionsMicrophones.ButtonExit);
-  // store InteractionID
-  if (Length(AudioInputProcessor.DeviceList) > 0) then
-    ExitButtonIID := MaxChannelCount + 4
-  else
-    ExitButtonIID := 2;
 
   Self.AddText(UThemes.Theme.OptionsMicrophones.SoundCardDesc);
   Self.AddText(UThemes.Theme.OptionsMicrophones.InputDesc);

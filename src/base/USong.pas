@@ -104,6 +104,7 @@ type
     Mp3:        IPath;
     Background: IPath;
     Video:      IPath;
+    Vocals:     IPath; // vocals-only track, analyzed instead of the microphones in developer mode
 
     // sorting methods
     Genre:      UTF8String;
@@ -218,6 +219,7 @@ begin
   Self.Mp3      := PATH_NONE();
   Self.Background:= PATH_NONE();
   Self.Video    := PATH_NONE();
+  Self.Vocals   := PATH_NONE();
 end;
 
 // This may be changed, when we rewrite song select code.
@@ -305,6 +307,7 @@ begin
   Self.Background := PATH_NONE;
   Self.Cover := PATH_NONE;
   Self.Video := PATH_NONE;
+  Self.Vocals := PATH_NONE;
   Self.VideoGAP := 0;
   Self.Creator := '';
   Self.Fixer   := '';
@@ -707,6 +710,14 @@ begin
             Self.Video := EncFile
           else
             Log.LogError('Can''t find video file in song: '+Self.FullPath);
+        end;
+        'VOCALS': //vocals-only audio file
+        begin
+          EncFile := DecodeFilename(Value);
+          if (Self.Path.Append(EncFile).IsFile) then
+            Self.Vocals := EncFile
+          else
+            Log.LogError('Can''t find vocals file in song: '+Self.FullPath);
         end;
         'VIDEOGAP': //video gap
           Self.VideoGAP := StrToFloatI18n(Value);

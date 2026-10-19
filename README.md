@@ -83,6 +83,25 @@ once it has finished and the main menu is shown.
 * The song menu also offers a source filter (all / standard / dynamic
   songs) to limit the shown songs to one kind of directory.
 
+## Developer mode
+
+Some options are meant for checking songs rather than for playing and
+are only shown when the developer mode is switched on in `config.ini`:
+
+```ini
+[Developer]
+DeveloperMode=On
+VocalsInput=Off
+```
+
+* `VocalsInput` — shown as **Vocals track** in **Options → Microphones**.
+  When it is on, songs with a `#VOCALS:` tag (an audio file that holds
+  only the vocals, e.g. from a vocal separation tool) are scored from
+  that file instead of the microphones: the pitch detection analyzes the
+  vocals at the time of every beat, so the score shows how well the
+  notes match the original singing. Songs without the tag still use the
+  microphones.
+
 ## Support and contact
 Visit our [official website](https://ultrastar-es.org) where you can find tutorials, songs, contests and more
 

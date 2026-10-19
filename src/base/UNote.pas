@@ -432,6 +432,10 @@ begin
         else
           LastPlayerNote := nil;
 
+        // developer mode: analyze the vocals track in the middle of the beat
+        if (VocalsInput.Active) then
+          VocalsInput.FillBuffer(CurrentSound, GetTimeFromBeat(ActualBeat) + 30 / CurrentSong.BPM);
+
         // analyze buffer
         CurrentSound.AnalyzeBuffer;
 

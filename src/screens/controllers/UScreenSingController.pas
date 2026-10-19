@@ -679,7 +679,8 @@ begin
   Text[screenSingViewRef.TextP6DuetSixP].Visible    := V6DuetSixP;
 
   BadPlayer := AudioInputProcessor.CheckPlayersConfig(PlayersPlay);
-  if (BadPlayer <> 0) then
+  // the vocals track of the song replaces the microphones in developer mode
+  if (BadPlayer <> 0) and not (VocalsInput.Enabled() and CurrentSong.Vocals.IsSet) then
   begin
     ScreenPopupError.ShowPopup(
         Format(Language.Translate('ERROR_PLAYER_NO_DEVICE_ASSIGNMENT'),
@@ -1132,8 +1133,17 @@ begin
 
   LyricsState.UpdateBeats();
 
-  // prepare and start voice-capture
-  AudioInput.CaptureStart;
+  // prepare and start voice-capture, in developer mode the vocals track of
+  // the song can replace the microphones
+  if CurrentSong.Vocals.IsSet and VocalsInput.Open(CurrentSong.Path.Append(CurrentSong.Vocals)) then
+    AudioInput.CaptureStop
+  else
+  begin
+    if VocalsInput.Enabled() and CurrentSong.Vocals.IsSet then
+      Log.LogWarn('The vocals file could not be used, the microphones are used instead', 'TScreenSingController.LoadNextSong');
+    VocalsInput.Close();
+    AudioInput.CaptureStart;
+  end;
 
   // main text
   Lyrics.Clear(CurrentSong.BPM);
@@ -1251,6 +1261,7 @@ var
 
 begin
   AudioInput.CaptureStop;
+  VocalsInput.Close();
   AudioPlayback.Stop;
   AudioPlayback.SetSyncSource(nil);
 
