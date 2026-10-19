@@ -127,6 +127,8 @@ type
     // the score was detected from the vocals track of the song (developer
     // mode), it is neither saved nor sent
     ScoredFromVocals: boolean;
+    // the missing microphone warning was shown, it is shown once per session
+    MicWarningShown: boolean;
 
     // some settings to be set by plugins
     Settings: record
@@ -498,6 +500,7 @@ begin
   SungToEnd := false;
   SungPaused := false;
   ScoredFromVocals := false;
+  MicWarningShown := false;
 
   ClearSettings;
   Party.CallBeforeSing;
@@ -1153,11 +1156,15 @@ begin
     begin
       if CurrentSong.Vocals.IsSet then
         Log.LogWarn('The vocals file could not be used, the microphones are used instead', 'TScreenSingController.LoadNextSong');
+      // the popup takes the input, do not repeat it while a medley is running
       BadPlayer := AudioInputProcessor.CheckPlayersConfig(PlayersPlay);
-      if (BadPlayer <> 0) then
+      if (BadPlayer <> 0) and not MicWarningShown then
+      begin
+        MicWarningShown := true;
         ScreenPopupError.ShowPopup(
             Format(Language.Translate('ERROR_PLAYER_NO_DEVICE_ASSIGNMENT'),
             [BadPlayer]));
+      end;
     end;
     VocalsInput.Close();
     AudioInput.CaptureStart;
