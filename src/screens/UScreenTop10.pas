@@ -151,7 +151,9 @@ begin
     PMax := 5;
   for I := 0 to PMax do
   begin
-    if (Round(Player[I].ScoreTotalInt) > 0) and (ScreenSing.SungToEnd) then
+    // scores from the vocals track of the song (developer mode) are not saved
+    if (Round(Player[I].ScoreTotalInt) > 0) and (ScreenSing.SungToEnd) and
+       (not ScreenSing.ScoredFromVocals) then
     begin
       DataBase.AddScore(CurrentSong, Ini.PlayerLevel[I], Ini.Name[I], Round(Player[I].ScoreTotalInt));
       sung:=true;

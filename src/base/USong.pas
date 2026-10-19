@@ -622,6 +622,8 @@ begin
   MedleyFlags := 0;
   Position := 0;
   Self.BPM := 0;
+  // a removed tag must not leave the file of a previous read
+  Self.Vocals := PATH_NONE;
 
   //Read first Line
   Self.SongFile.ReadLine(Line);
