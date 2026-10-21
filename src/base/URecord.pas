@@ -199,6 +199,7 @@ type
       fFormat:     TAudioFormatInfo;  // mono S16 at the sample rate of the file, nil if closed
 
       function Decode(Stream: TAudioDecodeStream): boolean;
+      procedure Normalize();
       function GetActive(): boolean;
     public
       destructor Destroy; override;
@@ -1082,7 +1083,35 @@ begin
   SetLength(Samples, SampleCount);
   Result := (SampleCount > 0);
   if (not Result) then
-    Log.LogError('The vocals file contains no audio data', 'TVocalsInput.Decode');
+    Log.LogError('The vocals file contains no audio data', 'TVocalsInput.Decode')
+  else
+    Normalize();
+end;
+
+procedure TVocalsInput.Normalize();
+const
+  TargetPeak = 0.9; // of full scale
+  MaxGain    = 16;  // a track with almost no voice stays quiet
+var
+  Peak: integer;
+  Gain: double;
+  i:    integer;
+begin
+  // A vocals track has the level of the mix it was separated from, often far
+  // below a microphone set up for singing; its quiet phrases would stay below
+  // the volume threshold of the pitch detection. Like the gain of a
+  // microphone, the loudest sample goes to TargetPeak.
+  Peak := 0;
+  for i := 0 to SampleCount-1 do
+    Peak := Max(Peak, Abs(integer(Samples[i])));
+  if (Peak = 0) then
+    Exit;
+  Gain := Min(TargetPeak * 32767 / Peak, MaxGain);
+  if (Gain <= 1) then
+    Exit;
+  for i := 0 to SampleCount-1 do
+    Samples[i] := smallint(EnsureRange(Round(Samples[i] * Gain), -32768, 32767));
+  Log.LogStatus(Format('Vocals amplified by %.1f dB', [20 * Log10(Gain)]), 'TVocalsInput.Normalize');
 end;
 
 procedure TVocalsInput.Close();
