@@ -37,11 +37,13 @@ uses
   SysUtils,
   UCommon,
   UMusic,
-  UIni;
+  UIni,
+  UPath;
 
 const
   BaseToneFreq = 65.4064; // lowest (half-)tone to analyze (C2 = 65.4064 Hz)
   NumHalftones = 46;      // C2-A5 (for Whitney and my high voice)
+  VolumeCheckSamples = 1024; // oldest samples of the analysis buffer that must exceed the threshold
 
 type
   TCaptureBuffer = class
@@ -186,7 +188,44 @@ type
   TSmallIntArray = array [0..(MaxInt div SizeOf(SmallInt))-1] of SmallInt;
   PSmallIntArray = ^TSmallIntArray;
 
+  {**
+   * Developer mode: provides the vocals track of a song (#VOCALS) to the
+   * pitch detection instead of the microphones.
+   *}
+  TVocalsInput = class
+    private
+      Samples:     array of smallint; // decoded vocals, mixed down to mono
+      SampleCount: integer;
+      fFormat:     TAudioFormatInfo;  // mono S16 at the sample rate of the file, nil if closed
+
+      function Decode(Stream: TAudioDecodeStream): boolean;
+      procedure Normalize();
+      function GetActive(): boolean;
+    public
+      destructor Destroy; override;
+
+      // true if the developer options allow to use vocals tracks
+      function Enabled(): boolean;
+
+      {**
+       * Decodes the vocals file completely.
+       * Returns false if the vocals input is disabled or the file could not
+       * be decoded, the microphones have to be used then.
+       *}
+      function Open(const Filename: IPath): boolean;
+      procedure Close();
+
+      {**
+       * Fills the analysis buffer of a player with the vocals at the given
+       * song time (in seconds).
+       *}
+      procedure FillBuffer(Buffer: TCaptureBuffer; Time: real);
+
+      property Active: boolean read GetActive;
+  end;
+
   function AudioInputProcessor(): TAudioInputProcessor;
+  function VocalsInput(): TVocalsInput;
 
 implementation
 
@@ -196,6 +235,7 @@ uses
 
 var
   singleton_AudioInputProcessor : TAudioInputProcessor = nil;
+  singleton_VocalsInput : TVocalsInput = nil;
 
 { Global }
 
@@ -205,6 +245,14 @@ begin
     singleton_AudioInputProcessor := TAudioInputProcessor.create();
 
   result := singleton_AudioInputProcessor;
+end;
+
+function VocalsInput(): TVocalsInput;
+begin
+  if singleton_VocalsInput = nil then
+    singleton_VocalsInput := TVocalsInput.Create();
+
+  Result := singleton_VocalsInput;
 end;
 
 { TAudioInputDevice }
@@ -356,7 +404,7 @@ begin
 
     // find maximum volume of first 1024 samples
     MaxVolume := 0;
-    for SampleIndex := 0 to 1023 do
+    for SampleIndex := 0 to VolumeCheckSamples-1 do
     begin
       Volume := Abs(AnalysisBuffer[SampleIndex]) / -Low(Smallint);
       if Volume > MaxVolume then
@@ -905,6 +953,209 @@ begin
     Inc(count);
     // set description
     result := name + ' ('+IntToStr(count)+')';
+  end;
+end;
+
+{ TVocalsInput }
+
+destructor TVocalsInput.Destroy;
+begin
+  Close();
+  inherited;
+end;
+
+function TVocalsInput.Enabled(): boolean;
+begin
+  Result := (Ini.DeveloperMode = 1) and (Ini.VocalsInput = 1);
+end;
+
+function TVocalsInput.GetActive(): boolean;
+begin
+  Result := assigned(fFormat);
+end;
+
+function TVocalsInput.Open(const Filename: IPath): boolean;
+var
+  Stream: TAudioDecodeStream;
+  i:      integer;
+begin
+  Close();
+  Result := false;
+
+  if (not Enabled()) then
+    Exit;
+
+  Stream := nil;
+  for i := 0 to AudioDecoders.Count-1 do
+  begin
+    Stream := IAudioDecoder(AudioDecoders[i]).Open(Filename);
+    if (assigned(Stream)) then
+      Break;
+  end;
+
+  if (not assigned(Stream)) then
+  begin
+    Log.LogError('Could not open vocals file "' + Filename.ToNative + '"', 'TVocalsInput.Open');
+    Exit;
+  end;
+
+  try
+    try
+      if (Decode(Stream)) then
+      begin
+        fFormat := TAudioFormatInfo.Create(1, Stream.GetAudioFormatInfo().SampleRate, asfS16);
+        Log.LogStatus('Analyzing the vocals file instead of the microphones: ' + Filename.ToNative, 'TVocalsInput.Open');
+        Result := true;
+      end
+      else
+        Close();
+    except
+      // e.g. out of memory for a very long file, the microphones are used then
+      on E: Exception do
+      begin
+        Log.LogError('Could not decode vocals file "' + Filename.ToNative + '": ' + E.Message, 'TVocalsInput.Open');
+        Close();
+      end;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
+function TVocalsInput.Decode(Stream: TAudioDecodeStream): boolean;
+const
+  ChunkSize = 65536; // bytes decoded at once
+var
+  SrcFormat:  TAudioFormatInfo;
+  Chunk:      array of byte;
+  BytesRead:  integer;
+  FrameCount: integer;
+  Frame:      integer;
+  Channel:    integer;
+  Data:       PByte;
+  Sum:        double;
+begin
+  Result := false;
+  SrcFormat := Stream.GetAudioFormatInfo();
+
+  // the decoder converts planar data to S16, only packed formats remain
+  if (not (SrcFormat.Format in [asfU8, asfS16, asfS32, asfFloat, asfDouble])) or
+     (SrcFormat.Channels = 0) or (SrcFormat.SampleRate <= 0) then
+  begin
+    Log.LogError('Unsupported sample format of the vocals file', 'TVocalsInput.Decode');
+    Exit;
+  end;
+
+  // reserve the expected length, the array grows if it was not exact
+  SetLength(Samples, Max(Round(Stream.Length * SrcFormat.SampleRate), 0) + 1);
+  SampleCount := 0;
+  SetLength(Chunk, (ChunkSize div SrcFormat.FrameSize) * SrcFormat.FrameSize);
+
+  repeat
+    BytesRead := Stream.ReadData(@Chunk[0], Length(Chunk));
+    FrameCount := Max(BytesRead, 0) div SrcFormat.FrameSize;
+
+    // the expected length is an estimate for some files, grow by one second
+    if (SampleCount + FrameCount > Length(Samples)) then
+      SetLength(Samples, SampleCount + FrameCount + Round(SrcFormat.SampleRate));
+
+    for Frame := 0 to FrameCount-1 do
+    begin
+      // mix all channels down to mono
+      Data := @Chunk[Frame * SrcFormat.FrameSize];
+      Sum := 0;
+      for Channel := 0 to SrcFormat.Channels-1 do
+      begin
+        case SrcFormat.Format of
+          asfU8:     Sum := Sum + (Data^ - 128) / 128;
+          asfS16:    Sum := Sum + PSmallInt(Data)^ / 32768;
+          asfS32:    Sum := Sum + PLongInt(Data)^ / 2147483648.0;
+          asfFloat:  Sum := Sum + PSingle(Data)^;
+          asfDouble: Sum := Sum + PDouble(Data)^;
+        end;
+        Inc(Data, SrcFormat.SampleSize);
+      end;
+      Samples[SampleCount] := smallint(EnsureRange(Round(Sum / SrcFormat.Channels * 32767), -32768, 32767));
+      Inc(SampleCount);
+    end;
+  until (FrameCount = 0);
+
+  SetLength(Samples, SampleCount);
+  Result := (SampleCount > 0);
+  if (not Result) then
+    Log.LogError('The vocals file contains no audio data', 'TVocalsInput.Decode')
+  else
+    Normalize();
+end;
+
+procedure TVocalsInput.Normalize();
+const
+  TargetPeak = 0.9; // of full scale
+  MaxGain    = 16;  // a track with almost no voice stays quiet
+var
+  Peak: integer;
+  Gain: double;
+  i:    integer;
+begin
+  // A vocals track has the level of the mix it was separated from, often far
+  // below a microphone set up for singing; its quiet phrases would stay below
+  // the volume threshold of the pitch detection. Like the gain of a
+  // microphone, the loudest sample goes to TargetPeak.
+  Peak := 0;
+  for i := 0 to SampleCount-1 do
+    Peak := Max(Peak, Abs(integer(Samples[i])));
+  if (Peak = 0) then
+    Exit;
+  Gain := Min(TargetPeak * 32767 / Peak, MaxGain);
+  if (Gain <= 1) then
+    Exit;
+  for i := 0 to SampleCount-1 do
+    Samples[i] := smallint(EnsureRange(Round(Samples[i] * Gain), -32768, 32767));
+  Log.LogStatus(Format('Vocals amplified by %.1f dB', [20 * Log10(Gain)]), 'TVocalsInput.Normalize');
+end;
+
+procedure TVocalsInput.Close();
+begin
+  Samples := nil;
+  SampleCount := 0;
+  FreeAndNil(fFormat);
+end;
+
+procedure TVocalsInput.FillBuffer(Buffer: TCaptureBuffer; Time: real);
+var
+  First: integer;
+  Index: integer;
+  i:     integer;
+begin
+  if (not Active) then
+    Exit;
+
+  // the pitch detection has to use the sample rate of the vocals
+  if (not assigned(Buffer.fAudioFormat)) or
+     (Buffer.fAudioFormat.SampleRate <> fFormat.SampleRate) or
+     (Buffer.fAudioFormat.Format <> fFormat.Format) or
+     (Buffer.fAudioFormat.Channels <> fFormat.Channels) then
+  begin
+    FreeAndNil(Buffer.fAudioFormat);
+    Buffer.fAudioFormat := fFormat.Copy();
+  end;
+
+  // center the samples of the volume check on the requested time, the pitch
+  // is analyzed in the following samples like the delayed sound of a microphone
+  First := Round(Time * fFormat.SampleRate) - VolumeCheckSamples div 2;
+
+  Buffer.LockAnalysisBuffer();
+  try
+    for i := 0 to High(Buffer.AnalysisBuffer) do
+    begin
+      Index := First + i;
+      if (Index >= 0) and (Index < SampleCount) then
+        Buffer.AnalysisBuffer[i] := Samples[Index]
+      else
+        Buffer.AnalysisBuffer[i] := 0;
+    end;
+  finally
+    Buffer.UnlockAnalysisBuffer();
   end;
 end;
 

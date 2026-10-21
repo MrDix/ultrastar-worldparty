@@ -124,6 +124,12 @@ type
     //use pause
     SungPaused: boolean;
 
+    // the score was detected from the vocals track of the song (developer
+    // mode), it is neither saved nor sent
+    ScoredFromVocals: boolean;
+    // the missing microphone warning was shown, it is shown once per session
+    MicWarningShown: boolean;
+
     // some settings to be set by plugins
     Settings: record
       Finish: Boolean; //< if true, screen will finish on next draw
@@ -493,6 +499,8 @@ begin
   //the song was sung to the end
   SungToEnd := false;
   SungPaused := false;
+  ScoredFromVocals := false;
+  MicWarningShown := false;
 
   ClearSettings;
   Party.CallBeforeSing;
@@ -679,7 +687,9 @@ begin
   Text[screenSingViewRef.TextP6DuetSixP].Visible    := V6DuetSixP;
 
   BadPlayer := AudioInputProcessor.CheckPlayersConfig(PlayersPlay);
-  if (BadPlayer <> 0) then
+  // with the vocals input enabled the microphones are checked for each song,
+  // see LoadNextSong()
+  if (BadPlayer <> 0) and not VocalsInput.Enabled() then
   begin
     ScreenPopupError.ShowPopup(
         Format(Language.Translate('ERROR_PLAYER_NO_DEVICE_ASSIGNMENT'),
@@ -858,6 +868,7 @@ procedure TScreenSingController.LoadNextSong();
 var
   Color:      TRGB;
   Index:      integer;
+  BadPlayer:  integer;
   VideoFile:  IPath;
   BgFile:     IPath;
 
@@ -1132,8 +1143,32 @@ begin
 
   LyricsState.UpdateBeats();
 
-  // prepare and start voice-capture
-  AudioInput.CaptureStart;
+  // prepare and start voice-capture, in developer mode the vocals track of
+  // the song can replace the microphones
+  if CurrentSong.Vocals.IsSet and VocalsInput.Open(CurrentSong.Path.Append(CurrentSong.Vocals)) then
+  begin
+    AudioInput.CaptureStop;
+    ScoredFromVocals := true;
+  end
+  else
+  begin
+    if VocalsInput.Enabled() then
+    begin
+      if CurrentSong.Vocals.IsSet then
+        Log.LogWarn('The vocals file could not be used, the microphones are used instead', 'TScreenSingController.LoadNextSong');
+      // the popup takes the input, do not repeat it while a medley is running
+      BadPlayer := AudioInputProcessor.CheckPlayersConfig(PlayersPlay);
+      if (BadPlayer <> 0) and not MicWarningShown then
+      begin
+        MicWarningShown := true;
+        ScreenPopupError.ShowPopup(
+            Format(Language.Translate('ERROR_PLAYER_NO_DEVICE_ASSIGNMENT'),
+            [BadPlayer]));
+      end;
+    end;
+    VocalsInput.Close();
+    AudioInput.CaptureStart;
+  end;
 
   // main text
   Lyrics.Clear(CurrentSong.BPM);
@@ -1251,10 +1286,12 @@ var
 
 begin
   AudioInput.CaptureStop;
+  VocalsInput.Close();
   AudioPlayback.Stop;
   AudioPlayback.SetSyncSource(nil);
 
-  if (ScreenSong.Mode = smNormal) and (SungPaused = false) and (SungToEnd) and (Length(DllMan.Websites) > 0) then
+  if (ScreenSong.Mode = smNormal) and (SungPaused = false) and (SungToEnd) and
+     (not ScoredFromVocals) and (Length(DllMan.Websites) > 0) then
   begin
     AutoSendScore;
     AutoSaveScore;
