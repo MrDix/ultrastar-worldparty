@@ -415,7 +415,8 @@ begin
           else
           begin
             if (ScreenSing.SungPaused = false) and
-               (ScreenSing.SungToEnd) and (Length(DllMan.Websites) > 0) then
+               (ScreenSing.SungToEnd) and
+               (not ScreenSing.SongSeeked) and (Length(DllMan.Websites) > 0) then
               InteractNext;
           end;
         end;
@@ -440,7 +441,8 @@ begin
           else
           begin
             if (ScreenSing.SungPaused = false) and
-               (ScreenSing.SungToEnd) and (Length(DllMan.Websites) > 0) then
+               (ScreenSing.SungToEnd) and
+               (not ScreenSing.SongSeeked) and (Length(DllMan.Websites) > 0) then
               InteractPrev;
           end;
 
@@ -1185,27 +1187,28 @@ begin
     Statics[StaticLevelRound[P]].Visible     := false;
   end;
 
-  for I := 0 to 2 do
+  for I := 1 to 3 do
   begin
-    Button[I].Visible := false;
-    Button[I].Selectable := false;
+    Button[ButtonSend[I]].Visible := false;
+    Button[ButtonSend[I]].Selectable := false;
   end;
 
   // Show Send Score Buttons
-  if (ScreenSing.SungPaused = false) and (ScreenSing.SungToEnd) and (Length(DllMan.Websites) > 0) then
+  if (ScreenSing.SungPaused = false) and (ScreenSing.SungToEnd) and
+     (not ScreenSing.SongSeeked) and (Length(DllMan.Websites) > 0) then
   begin
     case PlayersPlay of
       1: begin
-           Button[0].Visible := true;
-           Button[0].Selectable := true;
+           Button[ButtonSend[1]].Visible := true;
+           Button[ButtonSend[1]].Selectable := true;
          end;
       2,4: begin
-             Button[1].Visible := true;
-             Button[1].Selectable := true;
+             Button[ButtonSend[2]].Visible := true;
+             Button[ButtonSend[2]].Selectable := true;
            end;
       3,6: begin
-             Button[2].Visible := true;
-             Button[2].Selectable := true;
+             Button[ButtonSend[3]].Visible := true;
+             Button[ButtonSend[3]].Selectable := true;
            end;
     end;
   end;
@@ -1408,7 +1411,8 @@ begin
   ThemeIndex := PlayerPositionMap[PlayerNumber-1].Position;
   if (ThemeIndex > 0) and ((ScreenAct = PlayerPositionMap[PlayerNumber-1].Screen) or (PlayerPositionMap[PlayerNumber-1].BothScreens)) then
   begin
-    case (Player[PlayerNumber-1].ScoreTotalInt) of
+    // repeated lines after jumping in the song can exceed the maximum
+    case Min(Player[PlayerNumber-1].ScoreTotalInt, MAX_SONG_SCORE) of
      0..2009:
        begin
          Text[TextScore[ThemeIndex]].Text := Language.Translate('SING_SCORE_TONE_DEAF');
@@ -1582,7 +1586,8 @@ begin
       BarStartPosY := 0;
   end;
   // the height dependend of the score
-  Height2Reach := (Score / MAX_SONG_SCORE) * MaxHeight;
+  // the bars must stay in their box if repeated lines exceed the maximum
+  Height2Reach := (Score / Max(MAX_SONG_SCORE, Player[PlayerNumber - 1].ScoreTotalInt)) * MaxHeight;
 
   NewHeight := 0;
   if (aPlayerScoreScreenDatas[PlayerNumber].Bar_Actual_Height < Height2Reach) then

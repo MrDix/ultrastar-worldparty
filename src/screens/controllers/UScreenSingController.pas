@@ -124,6 +124,9 @@ type
     //use pause
     SungPaused: boolean;
 
+    //jumped to another line of the song, so the score is not comparable
+    SongSeeked: boolean;
+
     // some settings to be set by plugins
     Settings: record
       Finish: Boolean; //< if true, screen will finish on next draw
@@ -180,6 +183,7 @@ type
 
     procedure Finish; virtual;
     procedure Pause; // toggle pause
+    procedure SeekLine(Forward: boolean); // jump to the previous or next line
     procedure UpdateMedleyStats(medley_end: boolean);
     procedure OnSentenceEnd(CP: integer; SentenceIndex: cardinal);     // for linebonus + singbar
     procedure OnSentenceChange(CP: integer; SentenceIndex: cardinal);  // for golden notes
@@ -249,6 +253,7 @@ begin
         AudioPlayback.SetPosition(CurrentSong.Start);
         if (Assigned(fCurrentVideo)) then
            fCurrentVideo.Position := CurrentSong.VideoGAP + CurrentSong.Start;// + (CurrentSong.gap / 1000.0 - 5.0);
+        SongSeeked := false;
         Scores.KillAllPopUps;
         // setup score manager
         Scores.ClearPlayers; // clear old player values
@@ -390,6 +395,12 @@ begin
         AudioPlayback.PlaySound(SoundLib.Back);
       end;
 
+      // jump to the previous or next line of the lyrics
+      SDLK_LEFT:
+        SeekLine(false);
+      SDLK_RIGHT:
+        SeekLine(true);
+
       SDLK_TAB: // change visualization preset
       begin
         if fShowVisualization then
@@ -436,6 +447,105 @@ begin
       fCurrentVideo.Pause;
 
     Paused := false;
+  end;
+end;
+
+procedure TScreenSingController.SeekLine(Forward: boolean);
+const
+  // going back within this time after the start of a line jumps to the line
+  // before it, otherwise to the start of the current line
+  BackThreshold = 1.0;
+  // a line starting within this time ahead is skipped when going forward
+  ForwardThreshold = 0.1;
+  // lands safely behind the start beat of the line despite rounding
+  BeatOffset = 0.01;
+var
+  CurrentTime, LineTime, Target, FirstTime: real;
+  CP, MaxCP, I: integer;
+  Found: boolean;
+begin
+  // jumping would distort the result of a competition or medley
+  if not (ScreenSong.Mode in [smNormal, smPlaylistRandom]) then
+    Exit;
+
+  MaxCP := 0;
+  if (CurrentSong.isDuet) and (PlayersPlay <> 1) then
+    MaxCP := 1;
+
+  CurrentTime := LyricsState.GetCurrentTime();
+  Target := 0;
+  FirstTime := -1;
+  Found := false;
+  for CP := 0 to MaxCP do
+    for I := 0 to CurrentSong.Lines[CP].High do
+    begin
+      if (Length(CurrentSong.Lines[CP].Line[I].Note) = 0) then
+        Continue;
+
+      LineTime := GetTimeFromBeat(CurrentSong.Lines[CP].Line[I].Start);
+      // lines behind the end of the song (#END) are never sung
+      if (CurrentSong.Finish > 0) and (LineTime * 1000 >= CurrentSong.Finish) then
+        Continue;
+
+      if (FirstTime < 0) or (LineTime < FirstTime) then
+        FirstTime := LineTime;
+
+      if Forward then
+      begin
+        if (LineTime > CurrentTime + ForwardThreshold) and
+           (not Found or (LineTime < Target)) then
+        begin
+          Target := LineTime;
+          Found := true;
+        end;
+      end
+      else if (LineTime < CurrentTime - BackThreshold) and
+              (not Found or (LineTime > Target)) then
+      begin
+        Target := LineTime;
+        Found := true;
+      end;
+    end;
+
+  // going back during the first line returns to its start
+  if not Found and not Forward and (FirstTime >= 0) and
+     (FirstTime < CurrentTime - ForwardThreshold) then
+  begin
+    Target := FirstTime;
+    Found := true;
+  end;
+
+  if not Found then
+    Exit;
+
+  Target := Max(0, Target + BeatOffset * 60 / CurrentSong.BPM);
+  SongSeeked := true;
+
+  // move the lyrics first, the music may synchronize to them
+  LyricsState.SetCurrentTime(Target);
+  AudioPlayback.SetPosition(Target);
+  // the visualization uses the position to pick a preset, so only move a video
+  if (Assigned(fCurrentVideo)) and (fCurrentVideo = fVideoClip) then
+    fCurrentVideo.Position := CurrentSong.VideoGAP + Target;
+
+  LyricsState.UpdateBeats();
+
+  Scores.KillAllPopUps;
+
+  // the lyrics only move forward, so refill them from the new line on
+  Lyrics.Clear(CurrentSong.BPM);
+  LyricsDuetP1.Clear(CurrentSong.BPM);
+  LyricsDuetP2.Clear(CurrentSong.BPM);
+
+  for CP := 0 to MaxCP do
+  begin
+    CurrentSong.Lines[CP].Current := 0;
+    for I := 0 to CurrentSong.Lines[CP].High do
+    begin
+      if LyricsState.CurrentBeat >= CurrentSong.Lines[CP].Line[I].Start then
+        CurrentSong.Lines[CP].Current := I;
+    end;
+    NewSentence(CP, Self);
   end;
 end;
 
@@ -493,6 +603,7 @@ begin
   //the song was sung to the end
   SungToEnd := false;
   SungPaused := false;
+  SongSeeked := false;
 
   ClearSettings;
   Party.CallBeforeSing;
@@ -1254,7 +1365,8 @@ begin
   AudioPlayback.Stop;
   AudioPlayback.SetSyncSource(nil);
 
-  if (ScreenSong.Mode = smNormal) and (SungPaused = false) and (SungToEnd) and (Length(DllMan.Websites) > 0) then
+  if (ScreenSong.Mode = smNormal) and (SungPaused = false) and (SungToEnd) and
+     (not SongSeeked) and (Length(DllMan.Websites) > 0) then
   begin
     AutoSendScore;
     AutoSaveScore;
