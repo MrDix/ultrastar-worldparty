@@ -90,8 +90,9 @@ the lyrics, both while singing and while the song is paused (**P** or
 **Space**):
 
 * **Right** jumps to the start of the next line.
-* **Left** jumps back to the start of the current line; pressed again
-  within a second, it goes on to the line before.
+* **Left** jumps back to the start of the current line; within the first
+  second of a line (for example when pressed again right after a jump) it
+  goes to the line before.
 
 This is meant for practicing a part of a song. Once a jump was made, the
 score is not saved in the highscores and cannot be uploaded; lines that

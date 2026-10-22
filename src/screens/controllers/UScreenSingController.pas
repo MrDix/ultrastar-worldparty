@@ -518,7 +518,8 @@ begin
   if not Found then
     Exit;
 
-  Target := Max(0, Target + BeatOffset * 60 / CurrentSong.BPM);
+  // never jump before the start of the song (#START)
+  Target := Max(CurrentSong.Start, Target + BeatOffset * 60 / CurrentSong.BPM);
   SongSeeked := true;
 
   // move the lyrics first, the music may synchronize to them
