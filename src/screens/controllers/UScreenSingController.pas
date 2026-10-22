@@ -85,6 +85,7 @@ type
     StartNote:     TPos;
 
     procedure LoadNextSong();
+    procedure RefreshLines();
 
     procedure SongError();
   public
@@ -267,10 +268,7 @@ begin
           Scores.AddPlayer(Tex_ScoreBG[i1], Color);
         end;
         LyricsState.SetCurrentTime(CurrentSong.Start);
-
-		Lyrics.Clear(CurrentSong.BPM);
-		LyricsDuetP1.Clear(CurrentSong.BPM);
-		LyricsDuetP2.Clear(CurrentSong.BPM);
+        RefreshLines();
 
         Scores.Init;
         Exit;
@@ -529,11 +527,23 @@ begin
   if (Assigned(fCurrentVideo)) and (fCurrentVideo = fVideoClip) then
     fCurrentVideo.Position := CurrentSong.VideoGAP + Target;
 
+  Scores.KillAllPopUps;
+  RefreshLines();
+end;
+
+// Selects the lines at the current lyrics time after the time was set to
+// another position of the song
+procedure TScreenSingController.RefreshLines();
+var
+  CP, MaxCP, I: integer;
+begin
+  MaxCP := 0;
+  if (CurrentSong.isDuet) and (PlayersPlay <> 1) then
+    MaxCP := 1;
+
   LyricsState.UpdateBeats();
 
-  Scores.KillAllPopUps;
-
-  // the lyrics only move forward, so refill them from the new line on
+  // the lyrics only move forward, so refill them from the current line on
   Lyrics.Clear(CurrentSong.BPM);
   LyricsDuetP1.Clear(CurrentSong.BPM);
   LyricsDuetP2.Clear(CurrentSong.BPM);
