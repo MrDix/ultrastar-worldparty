@@ -83,6 +83,23 @@ once it has finished and the main menu is shown.
 * The song menu also offers a source filter (all / standard / dynamic
   songs) to limit the shown songs to one kind of directory.
 
+## Jumping between lines while singing
+
+**Cursor left** and **cursor right** jump to the previous or next line of
+the lyrics, both while singing and while the song is paused (**P** or
+**Space**):
+
+* **Right** jumps to the start of the next line.
+* **Left** jumps back to the start of the current line; within the first
+  second of a line (for example when pressed again right after a jump) it
+  goes to the line before.
+
+This is meant for practicing a part of a song. Once a jump was made, the
+score is not saved in the highscores and cannot be uploaded; lines that
+are sung again count again, so the shown score is only a rough guide.
+Restarting the song with **R** makes it count normally again. The keys
+do nothing in party modes and medleys.
+
 ## Support and contact
 Visit our [official website](https://ultrastar-es.org) where you can find tutorials, songs, contests and more
 
